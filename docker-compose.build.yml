@@ -1,0 +1,22 @@
+# Build the image locally instead of pulling it from GHCR.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Use this when you need a different ORCA_VERSION, a different UID/GID than the
+# published image uses, or extra system packages.
+#
+# Note: PUID/PGID are build-time arguments. Changing them here changes the uid
+# the image's `orca` user gets, which is why the same values are also used for
+# `user:` in docker-compose.yml.
+
+services:
+  orca:
+    image: ${ORCA_IMAGE:-ghcr.io/ivan-cavero/orca-headless:latest}
+    build:
+      context: .
+      args:
+        ORCA_VERSION: ${ORCA_VERSION:-v1.4.206}
+        PUID: ${PUID:-1000}
+        PGID: ${PGID:-1000}
+        # Space-separated extra apt packages, e.g. "gnupg2 pass" for a keyring.
+        ORCA_EXTRA_PACKAGES: ${ORCA_EXTRA_PACKAGES:-}

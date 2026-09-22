@@ -1,0 +1,18 @@
+# Rootless Podman overlay.
+#
+#   podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d
+#
+# Rootless Podman maps host UID 1000 to container UID 0, so a bind-mounted
+# directory owned by you on the host shows up inside the container as root-owned
+# and the non-root `orca` user cannot write to it. `userns_mode: keep-id` makes
+# the mapping identity, so container UID 1000 is host UID 1000 again.
+#
+# Do NOT use this file with Docker Compose: Docker only accepts `host` for
+# `userns_mode` and will reject `keep-id`.
+#
+# If your host runs SELinux (Fedora, RHEL, CentOS), also set
+# ORCA_SELINUX_LABEL=:z in .env.
+
+services:
+  orca:
+    userns_mode: keep-id

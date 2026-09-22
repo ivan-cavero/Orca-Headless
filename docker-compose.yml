@@ -1,0 +1,76 @@
+# Orca Headless Docker — example deployment.
+#
+#   cp .env.example .env      # then edit ORCA_PAIRING_ADDRESS
+#   mkdir -p workspace
+#   docker compose up -d
+#
+# Full documentation: README.md
+
+services:
+  orca:
+    # Published image. Point ORCA_IMAGE at your own GHCR path if you forked.
+    image: ${ORCA_IMAGE:-ghcr.io/ivan-cavero/orca-headless:latest}
+    container_name: orca
+
+    restart: unless-stopped
+    # Reap the zombie processes Electron leaves behind and forward SIGTERM.
+    init: true
+    # Orca owns its Xvfb child; give it room to shut down cleanly.
+    stop_grace_period: 30s
+
+    # Must match the image's build-time PUID/PGID, otherwise the mounted state
+    # directory is owned by a different uid and Orca cannot persist anything.
+    # See "Changing PUID / PGID" in the README before changing this.
+    user: "${PUID:-1000}:${PGID:-1000}"
+
+    ports:
+      # host:container — both sides read the same variable so they cannot drift.
+      - "${ORCA_PORT:-6768}:${ORCA_PORT:-6768}"
+
+    environment:
+      # Port Orca listens on inside the container.
+      ORCA_PORT: "${ORCA_PORT:-6768}"
+      # Address clients dial. NOT the bind address. Must be reachable from the
+      # client: the host's LAN IP, DNS name, Tailscale address, or a full
+      # reverse-proxy URL such as https://orca.example.com/runtime.
+      ORCA_PAIRING_ADDRESS: "${ORCA_PAIRING_ADDRESS:-127.0.0.1}"
+      # Emit the versioned single-line JSON readiness contract (recommended).
+      ORCA_JSON: "${ORCA_JSON:-true}"
+      # Chromium's sandbox cannot work in a default container; see the README
+      # section "About --no-sandbox" before flipping this to false.
+      ORCA_NO_SANDBOX: "${ORCA_NO_SANDBOX:-true}"
+      # Extra flags appended verbatim to `orca serve`.
+      ORCA_EXTRA_ARGS: "${ORCA_EXTRA_ARGS:-}"
+
+    volumes:
+      # Persisted Orca state: projects, worktree metadata, terminal history,
+      # orchestration state and paired-device keys. Orca uses both
+      # ~/.config/orca and ~/.config/Orca, so mount the whole directory.
+      - orca-config:/home/orca/.config
+      # Your repositories. Create it on the host first: mkdir -p ./workspace
+      # Orca stores absolute paths in its state, so keep this path stable.
+      #
+      # On an SELinux host (Fedora, RHEL, CentOS) set ORCA_SELINUX_LABEL=:z in
+      # .env, otherwise the container cannot write to this directory.
+      - ${ORCA_WORKSPACE:-./workspace}:/home/orca/workspace${ORCA_SELINUX_LABEL:-}
+
+    # Mirrors the HEALTHCHECK baked into the image; uncomment to tune it here.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/orca-healthcheck"]
+      interval: 15s
+      timeout: 10s
+      # First boot may migrate persisted state, so allow a generous warm-up.
+      # Failures during start_period do not count towards retries.
+      start_period: 90s
+      retries: 3
+
+    # Hardening. Both options are compatible with ORCA_NO_SANDBOX=true.
+    # If you set ORCA_NO_SANDBOX=false you must drop both of these and add
+    # `cap_add: [SYS_ADMIN]` instead — see the README.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  orca-config:
