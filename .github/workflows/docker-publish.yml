@@ -44,18 +44,28 @@ jobs:
           docker compose -f docker-compose.build.yml config >/dev/null
 
       - name: Assert ORCA_HOME_DIR produces an identity mount
-        # The host-path mode is a single variable: the mount source and target
-        # must both be the value, so container paths equal host paths.
+        # Parse the resolved config as JSON instead of grepping its text. Docker
+        # Compose normalizes short-form volumes to long form, so a text match on
+        # "src:dst" passes with one renderer and silently fails with the other —
+        # which is exactly how this step first broke.
         run: |
-          out=$(ORCA_HOME_DIR=/srv/orca/home docker compose -f docker-compose.yml config)
-          echo "$out" | grep -q '/srv/orca/home:/srv/orca/home'
-          echo "$out" | grep -q 'HOME: /srv/orca/home'
+          out=$(ORCA_HOME_DIR=/srv/orca/home docker compose -f docker-compose.yml config --format json)
+          if ! echo "$out" | jq -e '.services.orca.environment.HOME == "/srv/orca/home"'; then
+            echo "::error::HOME is not the configured ORCA_HOME_DIR"; echo "$out" | jq .; exit 1
+          fi
+          if ! echo "$out" | jq -e '[.services.orca.volumes[] | select(.source == "/srv/orca/home" and .target == "/srv/orca/home")] | length == 1'; then
+            echo "::error::the mount is not an identity bind of ORCA_HOME_DIR"; echo "$out" | jq .; exit 1
+          fi
 
       - name: Assert the default needs no host directory
         run: |
-          out=$(docker compose -f docker-compose.yml config)
-          echo "$out" | grep -q 'orca-home:/home/orca'
-          echo "$out" | grep -q 'HOME: /home/orca'
+          out=$(docker compose -f docker-compose.yml config --format json)
+          if ! echo "$out" | jq -e '.services.orca.environment.HOME == "/home/orca"'; then
+            echo "::error::HOME is not the image default"; echo "$out" | jq .; exit 1
+          fi
+          if ! echo "$out" | jq -e '[.services.orca.volumes[] | select(.source == "orca-home" and .target == "/home/orca")] | length == 1'; then
+            echo "::error::the default is not a named volume at /home/orca"; echo "$out" | jq .; exit 1
+          fi
 
   build:
     name: Build and push
