@@ -83,6 +83,15 @@ ARG PGID=1000
 ARG ORCA_USER=orca
 # Space-separated extra apt packages (for example agent CLIs' system deps).
 ARG ORCA_EXTRA_PACKAGES=""
+# Optional Node.js, downloaded from nodejs.org. Leave empty for a smaller image.
+# Set it when you need `orca skills install` or want to install agent CLIs with
+# npm: Ubuntu 24.04's own nodejs is 18, and the community `skills` CLI requires
+# >= 22.20. Pinned by exact version so the build stays reproducible; the official
+# tarball is used rather than an apt repository, which keeps the image smaller and
+# avoids adding a third-party apt source.
+ARG NODE_VERSION=""
+
+SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -106,8 +115,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Package list from Orca's official headless guide (Ubuntu 24.04 / Debian 13+
 # naming, where the 64-bit time_t transition added the `t64` suffix), plus
 # netcat-openbsd for the healthcheck.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       file \
@@ -137,8 +147,24 @@ RUN apt-get update \
       libx11-xcb1 \
       libxcb-dri3-0 \
       libxss1 \
-      ${ORCA_EXTRA_PACKAGES} \
- && rm -rf /var/lib/apt/lists/*
+      ${ORCA_EXTRA_PACKAGES}; \
+    \
+    if [ -n "${NODE_VERSION}" ]; then \
+      case "$(dpkg --print-architecture)" in \
+        amd64) node_arch="x64" ;; \
+        arm64) node_arch="arm64" ;; \
+        *) echo "FATAL: no Node.js build for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+      esac; \
+      curl -fsSL --retry 3 --retry-all-errors \
+        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz" \
+        -o /tmp/node.tgz; \
+      tar -xzf /tmp/node.tgz -C /usr/local --strip-components=1 \
+        --exclude='*/CHANGELOG.md'; \
+      rm -f /tmp/node.tgz; \
+      node --version; \
+      npm --version; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
 
 # Create the unprivileged service account. UID/GID are >= 1000 by construction:
 # the ubuntu:24.04 base already owns 1000 for its `ubuntu` account (which is also

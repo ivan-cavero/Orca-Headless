@@ -20,3 +20,7 @@ services:
         PGID: ${PGID:-1000}
         # Space-separated extra apt packages, e.g. "gnupg2 pass" for a keyring.
         ORCA_EXTRA_PACKAGES: ${ORCA_EXTRA_PACKAGES:-}
+        # Set to a Node.js version to enable `orca skills install` and
+        # `npm install -g` for agent CLIs. Costs about 200 MB, so it is opt-in.
+        # Ubuntu 24.04's own nodejs is 18 and is too old for the skills CLI.
+        NODE_VERSION: ${NODE_VERSION:-}
