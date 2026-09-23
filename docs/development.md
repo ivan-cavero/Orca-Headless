@@ -121,6 +121,8 @@ Honest accounting. The following were executed against the built image on **Podm
 | Orca opens the container's bash, not the host's shell | ✅ zsh and fish absent from the image |
 | Host dotfiles load only when `ORCA_HOME_DIR` points at that home | ✅ verified with a marker in a custom `.bashrc` |
 | Node 24 LTS works for `skills install` and `npm install -g` | ✅ v24.21.0, npm 11.19.0 |
+| A host agent binary runs inside the container via bind mount | ✅ real `opencode` 1.18.32 |
+| An already-paired client survives a `--mobile-pairing` restart | ✅ still connected |
 | The real **arm64** AppImage extracts without emulation | ✅ 3613 files, executable AppRun, `orca-ide` is aarch64 |
 | Orca publishes no 32-bit ARM build | ✅ only `orca-linux.AppImage` and `orca-linux-arm64.AppImage` exist |
 

@@ -97,8 +97,20 @@ Two consequences worth knowing, both verified:
 
 - A **desktop client cannot use a mobile-scoped code.** `orca-ide environment add`
   accepts it but the connection fails (`runtimeId: null`).
-- So you get **one or the other per run.** Leave `ORCA_EXTRA_ARGS` empty for desktop
-  and browser clients; set it when you are pairing a phone.
+- **The flag decides which link is emitted, not who may connect.** A client that has
+  already paired is unaffected. Verified: pair a desktop client with no flag, restart
+  with `--mobile-pairing`, and the desktop client is still `connected` while the
+  mobile-scoped link is being emitted.
+
+So **desktop and mobile can be paired to the same runtime at the same time.** The
+only thing you cannot have is both links from a single run. The workflow is:
+
+1. Start with `ORCA_EXTRA_ARGS` empty, pair your desktop and browser clients.
+2. Set `ORCA_EXTRA_ARGS=--mobile-pairing` and restart, pair the phone.
+3. Leave it set or clear it — either way both stay paired.
+
+Grants live in the state directory, so they survive restarts and redeploys. They are
+revoked from **Shared Server Access** on the client, not by this flag.
 
 `--no-pairing` disables pairing entirely if the runtime should not be reachable at
 all.

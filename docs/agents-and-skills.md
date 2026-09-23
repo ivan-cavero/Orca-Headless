@@ -20,17 +20,19 @@ This was verified, not assumed. On the machine used to build these docs:
 | `grok` | `/home/…/.grok/bin/grok` | not found |
 | `cursor-agent` | `/home/…/.local/bin/cursor-agent` | not found |
 
-The container could not even see `/home/<hostuser>`. Mounting the host's agent
-binaries is possible but fragile: the binaries must be built for the container's
-libc, and anything they resolve relative to their own path (bundled runtimes, plugin
-directories, credential stores) may break.
-
-**So: install the agents you want inside the image.** That is the supported path, and
-the [recipe below](#installing-an-agent) is verified end to end.
+The container could not even see `/home/<hostuser>`. The container is still isolated —
+Orca reads `PATH` inside it, not the host's — but a host binary **can** be mounted in
+and it will work if it is portable. That was verified with a real `opencode`, see
+[Running agents from the host](#running-agents-from-the-host).
 
 The practical consequence: an agent conversation lives in the container, with the
 container's credentials and the container's filesystem. A login on your laptop does
 not carry over, and a login inside the container does not exist on your laptop.
+
+**You do not have to install the agent inside the image.** A host binary can be
+bind-mounted and Orca will find it, provided it is portable. See
+[Running agents from the host](#running-agents-from-the-host) — verified with a real
+`opencode`.
 
 ---
 
@@ -184,7 +186,55 @@ working directory is the worktree checkout.
 
 ---
 
-## Installing an agent
+## Running agents from the host
+
+You do not have to bake the agent into the image. Bind-mount the directory that holds
+it and put it on `PATH`, and Orca finds it exactly as if it had been installed:
+
+```yaml
+services:
+  orca:
+    environment:
+      PATH: /home/orca/.bun/bin:/opt/orca/bin:/usr/local/bin:/usr/bin:/bin
+    volumes:
+      - /home/you/.bun:/home/orca/.bun:ro,z     # the agent binary
+      - /home/you/.agents:/home/orca/.agents:ro,z  # your skills
+```
+
+Verified against a real `opencode` (a Bun-compiled binary, 176 MB):
+
+| Check | Result |
+| --- | --- |
+| The host binary executes inside the container | ✅ `opencode --version` → `1.18.32` |
+| Orca resolves it on `PATH` | ✅ `/home/orca/.bun/bin/opencode` |
+| Orca targets it for `skills install` | ✅ `--agent opencode --agent universal` |
+| Orca reads the mounted `~/.agents/skills` | ✅ the host's skills listed as "Agent skills home" |
+| Container reaches `healthy` | ✅ zero warnings |
+
+### Why it works, and when it will not
+
+The binary is dynamically linked, and the host's glibc (2.43 on Fedora) is **newer**
+than the container's (2.39 on Ubuntu 24.04). It still ran, because Bun targets an old
+glibc baseline for portability. That is luck rather than a guarantee:
+
+- **A binary built against a newer glibc than the container's will fail** with a
+  version error. If that happens, the agent has to be installed inside the image
+  instead.
+- **The architecture must match.** An arm64 binary will not run in an amd64 container.
+- **On SELinux hosts the mount needs `:z`.** Without it the container gets
+  `Permission denied` even though the file is world-executable — which is exactly how
+  the first attempt at this failed.
+- **Anything the agent resolves relative to its own path** — bundled runtimes, plugin
+  directories, credential stores — has to come along in the mount, or be reachable at
+  the path the agent expects.
+
+Mounting is the right choice when you want the same agent, skills and configuration
+you already use on the host, kept in one place. Installing into the image is the
+right choice when you want the deployment to be reproducible from the image alone.
+
+---
+
+## Installing an agent in the image
 
 Node is opt-in, because most deployments do not need it and it costs about 200 MB.
 Build with it when you do:
@@ -288,6 +338,11 @@ Verified against a real image:
 | A custom `.bashrc` on the host is **not** loaded with the named volume | ✅ marker reads `NOT-SET` |
 | A custom `.bashrc` **is** loaded when `ORCA_HOME_DIR` points at that home | ✅ marker reads `host-dotfile-loaded`, interactive and login |
 | Node 24 LTS works for `skills install` and `npm install -g` | ✅ v24.21.0, npm 11.19.0 |
+| A host agent binary runs inside the container via bind mount | ✅ `opencode` 1.18.32, built against glibc 2.43, ran on the container's 2.39 |
+| Orca detects and targets that mounted agent | ✅ `--agent opencode --agent universal` |
+| Orca reads the host's `~/.agents/skills` when mounted | ✅ listed as "Agent skills home" |
+| The mount needs `:z` on an SELinux host | ✅ without it: `Permission denied` |
+| **An already-paired desktop client survives `--mobile-pairing`** | ✅ still `connected` while a mobile-scoped link is emitted |
 
 **Not verified:**
 

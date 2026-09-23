@@ -110,8 +110,11 @@ orca-ide account add --agent codex
 orca-ide account list
 ```
 
-**Orca cannot run an agent installed on the host.** A container is isolated: Orca
-launches agents from `PATH` in its own environment. See
+**Orca does not see the agents installed on your host by default.** A container is
+isolated: Orca launches agents from `PATH` in its own environment. A host binary can
+be bind-mounted and it will work if it is portable — see
+[Running agents from the host](agents-and-skills.md#running-agents-from-the-host) —
+but the default image contains none. See
 [Agents and skills](agents-and-skills.md#the-container-boundary) for the full model,
 including where skills are installed and why `npm install -g` needs root.
 

@@ -174,9 +174,9 @@ agrees with Orca. Full reference:
 | [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
 
 **Running agents?** Read [Agents and skills](docs/agents-and-skills.md) first. Orca
-launches agents from `PATH` inside its own environment, so it cannot see the ones
-installed on your host — they have to be in the image. That page has the verified
-recipe.
+launches agents from `PATH` inside its own environment, so it does not see the ones
+installed on your host by default — but a host binary **can** be bind-mounted and
+Orca will find it. That page has both verified recipes, and the caveats.
 
 ---
 
