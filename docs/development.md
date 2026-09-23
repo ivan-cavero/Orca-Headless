@@ -152,6 +152,39 @@ Honest accounting. The following were executed against the built image on **Podm
 
 ---
 
+## How the pipeline is ordered
+
+```
+lint ──> build (pushes :sha-<commit>) ──> smoke-test (amd64 + arm64, native) ──> publish (release tags)
+                                     └──> scan (Trivy ──> Security tab)
+```
+
+The order is the point. The build job publishes **only** an immutable
+`sha-<commit>` tag. `latest`, the branch tag and the semver tags are added by the
+publish job, and only after the smoke test has run the image on both architectures.
+Publishing `latest` at build time would mean a broken image is already live while it
+is still being verified.
+
+`publish` retags the existing multi-arch manifest with `docker buildx imagetools
+create`. It does not rebuild anything, so the bytes that were smoke tested are the
+bytes that ship.
+
+On a push, the smoke test **pulls the published `sha` image** rather than rebuilding
+it, so what gets verified is the artifact that will be promoted — not a local rebuild
+that happens to match. On a pull request nothing is published, so it builds locally.
+
+### The vulnerability scan is deliberately non-blocking
+
+Every published image is scanned with Trivy for `CRITICAL` and `HIGH` findings with a
+fix available, and the results land in the repository's **Security** tab.
+
+It does not fail the build. The image carries roughly 470 MB of distribution packages
+and most findings have no upstream fix; failing would block every build on something
+nobody can act on. Triage happens in the Security tab. See
+[SECURITY.md](../SECURITY.md).
+
+---
+
 ## Testing a change
 
 Before opening a pull request, run what CI runs:

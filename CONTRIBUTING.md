@@ -102,7 +102,8 @@ The bar depends on what you touched:
 | `scripts/healthcheck.sh` | It exits 0 when Orca is ready and non-zero when it is not. Do not just test the happy path. |
 | `scripts/pairing-url.sh` | It prints a pairing URL in both `ORCA_JSON=true` and `ORCA_JSON=false` modes. |
 | `docker-compose.yml` | `docker compose config` resolves, and `up -d` reaches `healthy`. If you touched volumes, show that state survives a `down` + `up`. |
-| Docs | Links resolve, and commands in the docs are ones you actually ran. |
+| `.github/workflows/` | The job graph is what you intend, and no release tag is applied before the smoke test runs. See [How the pipeline is ordered](docs/development.md#how-the-pipeline-is-ordered). |
+| Docs | Links resolve (`python3 scripts/check-links.py`), and commands in the docs are ones you actually ran. |
 
 For anything that changes how Orca's files are stored or mounted, **verify that a
 worktree survives a container recreate**. That is the failure this project has hit

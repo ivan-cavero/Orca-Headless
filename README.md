@@ -168,8 +168,10 @@ agrees with Orca. Full reference:
 | [Agents and skills](docs/agents-and-skills.md) | Where skills live, how Orca finds agents, and why it cannot run the ones on your host |
 | [Security](docs/security.md) | The non-root model, why `--no-sandbox` is the default, stored secrets |
 | [Troubleshooting](docs/troubleshooting.md) | Every startup log line explained, and the failures you are likely to hit |
-| [Development](docs/development.md) | Building the image, image size, the full verification table, what is *not* verified |
+| [Development](docs/development.md) | Building the image, image size, how the pipeline is ordered, the full verification table, what is *not* verified |
 | [Contributing](CONTRIBUTING.md) | How to report a bug and how to test a change |
+| [Security policy](SECURITY.md) | How to report a vulnerability privately, and the tradeoffs that are already known |
+| [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
 
 **Running agents?** Read [Agents and skills](docs/agents-and-skills.md) first. Orca
 launches agents from `PATH` inside its own environment, so it cannot see the ones
