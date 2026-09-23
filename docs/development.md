@@ -123,6 +123,8 @@ Honest accounting. The following were executed against the built image on **Podm
 | Node 24 LTS works for `skills install` and `npm install -g` | ✅ v24.21.0, npm 11.19.0 |
 | A host agent binary runs inside the container via bind mount | ✅ real `opencode` 1.18.32 |
 | An already-paired client survives a `--mobile-pairing` restart | ✅ still connected |
+| A home with mode `700` works | ✅ verified as uid 1001 |
+| Orca's `opencode-binder` reads `$HOME/.local/share/opencode/opencode.db` | ✅ and skips with a non-fatal error when it is absent |
 | The real **arm64** AppImage extracts without emulation | ✅ 3613 files, executable AppRun, `orca-ide` is aarch64 |
 | Orca publishes no 32-bit ARM build | ✅ only `orca-linux.AppImage` and `orca-linux-arm64.AppImage` exist |
 

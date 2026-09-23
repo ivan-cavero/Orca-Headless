@@ -208,7 +208,7 @@ their configuration, your skills. The entrypoint adds `$HOME/.local/bin`,
 Verified: with a home containing only `.bun/bin/opencode`, Orca detected `opencode`
 and targeted it for `skills install`.
 
-Two consequences:
+Three consequences:
 
 - **Orca's own state lives in that home too** — `/home/you/.config/orca` and
   `/home/you/orca/workspaces`. If you already run `orca serve` by hand on that host,
@@ -216,6 +216,23 @@ Two consequences:
   container exits 3 with "Another Orca instance is already running".
 - Your real home is mounted, so anything the agents write there is written to your
   real files. That is the point, but it is worth knowing.
+- **Orca reads opencode's session history from that home.** It runs an
+  `opencode-binder` against `$HOME/.local/share/opencode/opencode.db`, so mounting the
+  whole home brings your existing opencode sessions into Orca. Mounting only
+  `~/.config/opencode` does not: the binder fails with `SQLite database does not exist`
+  and skips. The failure is non-fatal, but the integration is missing.
+
+### What still has to be true
+
+This works for any account, but not unconditionally:
+
+- **`PUID`/`PGID` must match the owner of the home**, or the container can read it and
+  not write it. Check with `id -u` and `id -g`; it is not always 1000.
+- **A home with mode `700` is fine** — verified, as long as the uid matches.
+- **On a rootless runtime** add `userns_mode: keep-id`, or the home appears owned by a
+  stranger. **On SELinux** add `:z` to the mount.
+- **On Dokploy**, absolute host paths are cleaned between deployments, so use the
+  named volume with Advanced → Mounts instead of this mode.
 
 ### The explicit way: separate state, chosen mounts
 
