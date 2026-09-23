@@ -60,7 +60,17 @@ RUN set -eux; \
     # `--appimage-extract` writes squashfs-root as drwx------ owned by the
     # extracting user. Without this, the runtime user cannot traverse it and the
     # container dies before Electron starts.
-    chmod -R a+rX /opt/orca/app
+    chmod -R a+rX /opt/orca/app; \
+    \
+    # Orca is MIT, and the AppImage does not ship Orca's own copyright notice.
+    # MIT requires the notice to accompany copies, so fetch the exact text for
+    # the release being packaged rather than trusting the bundle to carry it.
+    if [ "${ORCA_VERSION}" = "latest" ]; then orca_ref="main"; else orca_ref="${ORCA_VERSION}"; fi; \
+    curl -fL --retry 3 --retry-all-errors \
+      "https://raw.githubusercontent.com/stablyai/orca/${orca_ref}/LICENSE" \
+      -o /opt/orca/LICENSE.orca; \
+    grep -q 'MIT License' /opt/orca/LICENSE.orca; \
+    grep -q 'Copyright' /opt/orca/LICENSE.orca
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +175,12 @@ RUN set -eux; \
 
 COPY --from=fetch /opt/orca/app /opt/orca/app
 COPY --from=fetch /opt/orca/VERSION /opt/orca/VERSION
+
+# Attribution. Orca's MIT notice must travel with the copy of Orca this image
+# redistributes, and the AppImage does not carry it. Electron's and Chromium's
+# own license files stay where Orca's bundle put them, under /opt/orca/app.
+COPY --from=fetch /opt/orca/LICENSE.orca /usr/share/licenses/orca/LICENSE
+COPY LICENSE NOTICE /usr/share/licenses/orca-headless/
 
 COPY entrypoint.sh /usr/local/bin/orca-entrypoint
 COPY scripts/healthcheck.sh /usr/local/bin/orca-healthcheck

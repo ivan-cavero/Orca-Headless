@@ -1,0 +1,33 @@
+Orca Headless Docker
+Copyright (c) 2026 Ivan Cavero
+
+This product packages Orca, which is distributed under the MIT License:
+
+    Orca — https://github.com/stablyai/orca
+    Copyright (c) 2026 Lovecast Inc.
+    Licensed under the MIT License. See LICENSE at
+    https://github.com/stablyai/orca/blob/main/LICENSE
+
+This repository is an independent packaging effort. It is not affiliated with,
+sponsored by, or endorsed by Lovecast Inc., Stably, or the Orca project. Bug
+reports about Orca itself belong upstream; bug reports about the container image,
+the compose file or these scripts belong here.
+
+The container image this repository builds redistributes Orca's application
+bundle. Because Orca's AppImage does not ship its own copyright notice, the build
+fetches the exact license text for the pinned Orca release and installs it at:
+
+    /usr/share/licenses/orca/LICENSE
+
+The image also contains the licenses that Orca's own bundle already carries:
+
+    /opt/orca/app/LICENSE.electron.txt      Electron
+    /opt/orca/app/LICENSES.chromium.html    Chromium and its dependencies
+
+The licenses for this repository's own files are installed alongside:
+
+    /usr/share/licenses/orca-headless/LICENSE   MIT, this repository
+    /usr/share/licenses/orca-headless/NOTICE    this file
+
+Orca is a trademark of its owner. This repository's use of the name describes what
+it packages and does not imply endorsement.

@@ -12,9 +12,10 @@
 .env.*
 !.env.example
 
-# Documentation and repository metadata
+# Documentation and repository metadata.
+# LICENSE and NOTICE are NOT excluded: the image installs both, and Orca's own
+# MIT notice has to travel with the copy of Orca the image redistributes.
 *.md
-LICENSE
 .github
 
 # Local compose overrides and scratch state
