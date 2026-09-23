@@ -1,7 +1,7 @@
 # Orca Headless Docker — example deployment.
 #
 #   cp .env.example .env      # then edit ORCA_PAIRING_ADDRESS
-#   mkdir -p workspace
+#   mkdir -p projects
 #   docker compose up -d
 #
 # Full documentation: README.md
@@ -24,35 +24,52 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
 
     ports:
-      # host:container — both sides read the same variable so they cannot drift.
-      - "${ORCA_PORT:-6768}:${ORCA_PORT:-6768}"
+      # host:container. Keep ORCA_HOST_PORT in sync with this mapping: the
+      # entrypoint uses it to build the advertised pairing URL, so a mismatch
+      # here would hand clients an address that nothing is listening on.
+      - "${ORCA_HOST_PORT:-6768}:${ORCA_PORT:-6768}"
 
     environment:
       # Port Orca listens on inside the container.
       ORCA_PORT: "${ORCA_PORT:-6768}"
+      # Port published on the host. Defaults to ORCA_PORT; only set it when the
+      # mapping above publishes a different host port.
+      ORCA_HOST_PORT: "${ORCA_HOST_PORT:-6768}"
       # Address clients dial. NOT the bind address. Must be reachable from the
       # client: the host's LAN IP, DNS name, Tailscale address, or a full
       # reverse-proxy URL such as https://orca.example.com/runtime.
+      # Add an explicit :port only when a reverse proxy owns the port.
       ORCA_PAIRING_ADDRESS: "${ORCA_PAIRING_ADDRESS:-127.0.0.1}"
       # Emit the versioned single-line JSON readiness contract (recommended).
       ORCA_JSON: "${ORCA_JSON:-true}"
       # Chromium's sandbox cannot work in a default container; see the README
       # section "About --no-sandbox" before flipping this to false.
       ORCA_NO_SANDBOX: "${ORCA_NO_SANDBOX:-true}"
-      # Extra flags appended verbatim to `orca serve`.
+      # Extra flags appended verbatim to `orca serve`, e.g. --mobile-pairing.
       ORCA_EXTRA_ARGS: "${ORCA_EXTRA_ARGS:-}"
 
     volumes:
-      # Persisted Orca state: projects, worktree metadata, terminal history,
-      # orchestration state and paired-device keys. Orca uses both
-      # ~/.config/orca and ~/.config/Orca, so mount the whole directory.
+      # 1. Orca's state: projects, worktree metadata, terminal history,
+      #    orchestration state and paired-device keys. Orca uses both
+      #    ~/.config/orca and ~/.config/Orca, so mount the whole directory.
       - orca-config:/home/orca/.config
-      # Your repositories. Create it on the host first: mkdir -p ./workspace
-      # Orca stores absolute paths in its state, so keep this path stable.
+
+      # 2. Worktree checkouts. Orca creates them under ~/orca/workspaces, NOT
+      #    under the repo you import. Without this volume every checkout is
+      #    destroyed when the container is recreated, while the metadata in
+      #    orca-config survives and points at paths that no longer exist.
+      - orca-workspaces:/home/orca/orca
+
+      # 3. Your repositories. Create it on the host first: mkdir -p ./projects
+      #    Orca records absolute paths, so keep the container path stable.
       #
-      # On an SELinux host (Fedora, RHEL, CentOS) set ORCA_SELINUX_LABEL=:z in
-      # .env, otherwise the container cannot write to this directory.
-      - ${ORCA_WORKSPACE:-./workspace}:/home/orca/workspace${ORCA_SELINUX_LABEL:-}
+      #    To keep the container path identical to the host path (recommended if
+      #    you also use git on the host), mount a host directory at its own
+      #    absolute path instead — see "Paths" in the README.
+      #
+      #    On an SELinux host (Fedora, RHEL, CentOS) set ORCA_SELINUX_LABEL=:z,
+      #    otherwise the container cannot write to this directory.
+      - ${ORCA_PROJECTS:-./projects}:/home/orca/projects${ORCA_SELINUX_LABEL:-}
 
     # Mirrors the HEALTHCHECK baked into the image; uncomment to tune it here.
     healthcheck:
@@ -74,3 +91,4 @@ services:
 
 volumes:
   orca-config:
+  orca-workspaces:

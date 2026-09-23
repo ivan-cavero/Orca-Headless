@@ -1,0 +1,69 @@
+# Orca Headless Docker — host-path deployment (recommended for a VPS).
+#
+#   docker compose -f docker-compose.hostpaths.yml up -d
+#
+# Use this INSTEAD of docker-compose.yml, not together with it.
+#
+# Why you would want it: Orca stores absolute paths in its state, and it creates
+# worktree checkouts under $HOME/orca/workspaces. With named volumes those paths
+# exist only inside the container, so the files are invisible from the host and
+# plain `git worktree list` on the host reports them as prunable.
+#
+# This file points HOME at a real host directory and mounts it at its own
+# absolute path, so the container path and the host path are identical:
+#
+#   /srv/orca/home/.config/orca                    Orca state
+#   /srv/orca/home/orca/workspaces/<repo>/<wt>     worktree checkouts
+#   /srv/orca/home/projects/<repo>                 your repositories
+#
+# You can inspect, edit and run git against all of it from the host, and Orca
+# agrees with what it sees.
+#
+# Before the first start:
+#
+#   sudo mkdir -p /srv/orca/home/projects
+#   sudo chown -R "$(id -u):$(id -g)" /srv/orca/home
+#
+# and set ORCA_HOME_DIR in .env to the absolute path you created.
+
+services:
+  orca:
+    image: ${ORCA_IMAGE:-ghcr.io/ivan-cavero/orca-headless:latest}
+    container_name: orca
+
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+
+    user: "${PUID:-1000}:${PGID:-1000}"
+
+    ports:
+      - "${ORCA_HOST_PORT:-6768}:${ORCA_PORT:-6768}"
+
+    environment:
+      # The lever that makes host paths identical inside and outside: Orca
+      # resolves its state and its worktree root relative to HOME.
+      HOME: "${ORCA_HOME_DIR:?Set ORCA_HOME_DIR in .env to an absolute host path, e.g. /srv/orca/home}"
+      ORCA_PORT: "${ORCA_PORT:-6768}"
+      ORCA_HOST_PORT: "${ORCA_HOST_PORT:-6768}"
+      ORCA_PAIRING_ADDRESS: "${ORCA_PAIRING_ADDRESS:-127.0.0.1}"
+      ORCA_JSON: "${ORCA_JSON:-true}"
+      ORCA_NO_SANDBOX: "${ORCA_NO_SANDBOX:-true}"
+      ORCA_EXTRA_ARGS: "${ORCA_EXTRA_ARGS:-}"
+
+    volumes:
+      # One mount, at its own absolute path. Everything Orca owns lives here.
+      # On an SELinux host (Fedora, RHEL, CentOS) set ORCA_SELINUX_LABEL=:z.
+      - ${ORCA_HOME_DIR}:${ORCA_HOME_DIR}${ORCA_SELINUX_LABEL:-}
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/orca-healthcheck"]
+      interval: 15s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
