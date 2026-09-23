@@ -6,17 +6,19 @@
 [![Orca](https://img.shields.io/badge/orca-v1.4.206-black)](https://github.com/stablyai/orca/releases)
 
 Run [Orca](https://www.onorca.dev) — the agent development environment — on a Linux
-server with **no desktop session**: a VPS, a build box, a VM, a home server.
+server with **no desktop session**: a VPS, a build box, a VM, a home server. Then
+connect to it from the Orca desktop app, the browser, or your phone.
 
 Orca ships a `serve` mode that runs the full runtime without opening a window, but
 getting it there by hand means installing a specific set of Electron libraries,
-working around a missing FUSE device, arranging a virtual X display, and keeping
-the thing alive across reboots. This repository packages all of that into one
-image and one `docker-compose.yml`, so the deployment is:
+working around a missing FUSE device, arranging a virtual X display, keeping the
+thing alive across reboots, and getting the pairing address right so a client can
+actually reach it. This repository packages all of that into one image and a
+compose file:
 
 ```bash
 cp .env.example .env      # set ORCA_PAIRING_ADDRESS
-mkdir -p workspace
+mkdir -p projects
 docker compose up -d
 ```
 
@@ -28,7 +30,8 @@ What you get:
   `no-new-privileges` applied.
 - **Persistent.** Projects, worktrees, terminal history and paired-device keys
   survive `docker compose down`, image upgrades, and even a `SIGKILL`.
-- **Configurable by environment.** Port, pairing address, UID/GID, JSON contract.
+- **Reachable.** A verified pairing flow for the desktop client, the web client
+  and the mobile app — with the port arithmetic handled for you.
 - **Verifiable.** The healthcheck parses Orca's own versioned readiness contract
   instead of just poking the TCP port.
 
@@ -41,9 +44,10 @@ What you get:
 ## Contents
 
 - [Quick start](#quick-start)
+- [Choose a deployment model](#choose-a-deployment-model)
 - [Connecting a client](#connecting-a-client)
+- [Paths](#paths)
 - [Configuration](#configuration)
-- [Volumes](#volumes)
 - [Updating](#updating)
 - [Security](#security)
 - [Running agent CLIs](#running-agent-clis)
@@ -57,8 +61,8 @@ What you get:
 
 ## Quick start
 
-Requirements: Docker Engine 20.10+ with the Compose plugin, on a 64-bit Linux host
-(`amd64` or `arm64`). No GPU, no display, no FUSE.
+Requirements: Docker Engine 20.10+ with the Compose plugin, or Podman 4+. A 64-bit
+Linux host (`amd64` or `arm64`). No GPU, no display, no FUSE.
 
 ```bash
 git clone https://github.com/ivan-cavero/orca-headless.git
@@ -67,11 +71,27 @@ cd orca-headless
 cp .env.example .env
 $EDITOR .env                     # at minimum: ORCA_PAIRING_ADDRESS
 
-mkdir -p workspace               # do this first, so you own the directory
+mkdir -p projects                # do this first, so you own the directory
 docker compose up -d
 ```
 
-Watch it come up:
+### With rootless Podman
+
+Add the Podman overlay — **always**, with either compose file. Rootless Podman maps
+your host UID to container UID 0, so any bind-mounted directory looks root-owned
+inside the container and the unprivileged `orca` user cannot write to it:
+
+```bash
+podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d
+```
+
+On an SELinux host (Fedora, RHEL, CentOS) also set `ORCA_SELINUX_LABEL=:z` in
+`.env`, or the label blocks writes even when Unix permissions look correct.
+
+The entrypoint warns when it detects either problem, naming the directory it could
+not write to, so a misconfiguration is loud rather than silent.
+
+### Check it came up
 
 ```bash
 docker compose logs -f orca
@@ -81,16 +101,12 @@ Within a few seconds Orca prints its readiness contract:
 
 ```json
 {"type":"orca_server_ready","schemaVersion":1,"runtimeId":"...",
- "endpoint":"ws://0.0.0.0:6768","boundEndpoint":"ws://0.0.0.0:6768",
+ "boundEndpoint":"ws://0.0.0.0:6768",
  "advertisedEndpoint":"ws://100.64.1.20:6768",
  "pairing":{"available":true,"url":"orca://pair?code=...","scope":"runtime"}}
 ```
 
 (The real output is a single compact line.)
-
-Copy the `pairing.url` value — that is what you paste into the client.
-
-Confirm the container is healthy:
 
 ```bash
 docker compose ps
@@ -98,29 +114,69 @@ docker compose ps
 # orca   Up 2 minutes (healthy)
 ```
 
-### With rootless Podman instead of Docker
+---
 
-Rootless Podman maps your host UID to container UID 0, so the bind-mounted
-workspace ends up root-owned inside the container and the unprivileged `orca`
-user cannot write to it. Add the Podman overlay, and on an SELinux host also set
-`ORCA_SELINUX_LABEL=:z`:
+## Choose a deployment model
+
+There are two, and the difference matters more than it looks. Orca stores
+**absolute paths** in its state and creates worktree checkouts under
+`$HOME/orca/workspaces` — a path derived from `HOME`. So where you point `HOME`
+decides whether the host and the container agree about where your files are.
+
+| | `docker-compose.yml` | `docker-compose.hostpaths.yml` |
+| --- | --- | --- |
+| State, worktrees | named Docker volumes | a real host directory |
+| Worktrees visible on the host | no | yes |
+| Host `git worktree list` on an Orca-created worktree | reports `prunable` | valid |
+| Setup effort | none | one `mkdir` + one variable |
+| Best for | trying it out, keeping the host clean | a VPS you also SSH into |
+
+**Use `docker-compose.yml` if** you want the simplest thing that works, and you
+will do all your git work through Orca.
+
+**Use `docker-compose.hostpaths.yml` if** you also work on the machine directly.
+It points `HOME` at a host directory and mounts it at its own absolute path, so
+the container path and the host path are identical:
+
+```
+/srv/orca/home/.config/orca                     Orca state
+/srv/orca/home/orca/workspaces/<repo>/<wt>      worktree checkouts
+/srv/orca/home/projects/<repo>                  your repositories
+```
 
 ```bash
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d
+sudo mkdir -p /srv/orca/home/projects
+sudo chown -R "$(id -u):$(id -g)" /srv/orca/home
+# then in .env:  ORCA_HOME_DIR=/srv/orca/home
+
+docker compose -f docker-compose.hostpaths.yml up -d
 ```
+
+`ORCA_HOME_DIR` is required — the file refuses to start without it rather than
+silently mounting a relative path. Use this file *instead of* `docker-compose.yml`,
+not together with it.
 
 ---
 
 ## Connecting a client
 
-On your laptop, open Orca and go to **Settings → Remote Orca Servers → Add
-Server**, then paste the `pairing.url` from the logs:
+Grab the pairing URL from the logs:
 
 ```bash
 docker compose logs orca | grep -o 'orca://pair?code=[^"]*' | tail -1
 ```
 
-The client dials `ORCA_PAIRING_ADDRESS`, so it must be an address the client can
+Then:
+
+- **Desktop app** — **Settings → Remote Orca Servers → Add Server**, paste the URL.
+- **Browser** — open the `webClientUrl` from the readiness line; it is the same
+  pairing code pre-encoded as a fragment.
+- **Mobile** — start with `ORCA_EXTRA_ARGS=--mobile-pairing`, which mints a code
+  with `"scope":"mobile"` for the Orca Mobile app's **Pair** flow.
+
+### The one thing that breaks connections
+
+The client dials `ORCA_PAIRING_ADDRESS`. It must be an address the client can
 actually reach:
 
 | Where the client runs | `ORCA_PAIRING_ADDRESS` |
@@ -137,30 +193,119 @@ Three things will silently break a connection:
 
 1. **`127.0.0.1`.** The pairing URL then points at the *client's* own loopback.
    The entrypoint warns about this at startup.
-2. **A firewall.** Open `ORCA_PORT` (default `6768`) for the client's source.
+2. **A firewall.** Open `ORCA_HOST_PORT` (default `6768`) for the client's source.
 3. **A reverse proxy without WebSocket upgrade.** The runtime speaks WebSocket,
    not HTTP; the proxy must forward the `Upgrade`/`Connection` headers and route
    the advertised path. Advertise `https://…` when TLS terminates at the proxy —
    Orca normalises it to `wss://`.
 
+### Ports, and why the entrypoint rewrites your address
+
+Orca builds the advertised endpoint from the address you give it plus **the port it
+bound inside the container**. That is the container's port, not the port you
+published. So publishing `-p 16774:6768` and advertising a bare `10.0.0.5` hands
+clients `ws://10.0.0.5:6768` — nothing is listening there.
+
+The entrypoint prevents this: it appends `ORCA_HOST_PORT` whenever the pairing
+address is a bare host, and leaves addresses alone when they already carry a port
+or are a full URL. Change `ORCA_HOST_PORT` in `.env` and the mapping, the advertised
+endpoint and the pairing code stay consistent.
+
+| `ORCA_PAIRING_ADDRESS` | `ORCA_HOST_PORT` | advertised |
+| --- | --- | --- |
+| `10.0.0.5` | `16774` | `ws://10.0.0.5:16774` |
+| `10.0.0.5:443` | `16774` | `ws://10.0.0.5:443` (explicit wins) |
+| `https://orca.example.com/runtime` | any | `wss://orca.example.com/runtime` |
+| `[fd00::1]` | `16774` | `ws://[fd00::1]:16774` |
+
+### Verify a pairing actually works
+
+The image ships the `orca-ide` CLI, so you can prove the connection from the server
+without a GUI client. `orca-ide status --environment <name>` queries the *remote*
+runtime over the paired WebSocket:
+
+```bash
+docker compose exec orca sh -c '
+  orca-ide environment add --name self --pairing-code "orca://pair?code=..."
+  orca-ide status --environment self --json | head -30'
+```
+
+A healthy answer carries `"runtime": {"state": "ready", "connectionState":
+"connected"}` and a `runtimeId` that is **not** `"local"`. That is the same
+handshake the desktop and mobile clients perform.
+
 The pairing URL contains a device credential and E2EE material. Treat it like a
-password, and revoke grants you no longer need from **Shared Server Access** on
-the server side.
+password, and revoke grants you no longer need from **Shared Server Access** on the
+server side.
+
+---
+
+## Paths
+
+Three paths matter, and each has one job.
+
+| Container path | Job | Must be writable | Must persist |
+| --- | --- | --- | --- |
+| `/home/orca/.config` | Orca's state: projects, worktree metadata, terminal history, orchestration state, paired-device keys. Orca uses **both** `~/.config/orca` and `~/.config/Orca`. | yes | yes |
+| `/home/orca/orca/workspaces` | The actual worktree checkouts. **Orca creates these here, not inside the repo you import.** | yes | yes |
+| `/home/orca/projects` (or your own path) | The repositories you import into Orca. | yes | yes |
+
+Two mistakes are easy to make and expensive:
+
+- **Not persisting `/home/orca/orca`.** The metadata in `.config` survives a
+  recreate but the checkouts do not, so Orca lists worktrees whose files are gone.
+  Both compose files mount it; if you write your own, do not forget it.
+- **Mounting the same named volume at both `.config/orca` and `.config/Orca`.**
+  Docker presents the same directory contents at both paths, which is not what
+  Orca expects. Mount the parent.
+
+### Importing a project
+
+Orca identifies a project by its **git remote**, not by a folder name. A folder
+with no `origin` remote cannot be imported — `project setup-existing-folder` fails
+with *"Imported folder does not match the selected project identity."* The project
+id is derived from the remote, for example `github:owner/repo`.
+
+For remote runtimes the path you pass must be an **absolute path inside the
+container**:
+
+```bash
+docker compose exec orca orca-ide project setup-existing-folder \
+  --project github:owner/repo --host local --path /home/orca/projects/repo --kind git --json
+```
+
+This is where the deployment model shows up. With `docker-compose.yml` you type
+`/home/orca/projects/...`; with `docker-compose.hostpaths.yml` you type the same
+path you would use on the host. Orca records whatever you type, so pick a stable
+container path and keep it.
+
+### Backing up
+
+```bash
+# named-volume model
+docker run --rm -v orca-headless_orca-config:/data -v "$PWD":/backup \
+  alpine tar czf /backup/orca-state-$(date +%F).tgz -C /data .
+
+# host-paths model
+sudo tar czf orca-state-$(date +%F).tgz -C /srv/orca/home .config orca
+```
 
 ---
 
 ## Configuration
 
-Every variable is optional; the defaults produce a working container. Copy
+Every variable is optional except `ORCA_HOME_DIR` in the host-paths model. Copy
 `.env.example` to `.env` and edit.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ORCA_PAIRING_ADDRESS` | `127.0.0.1` | **Set this.** Address clients dial. A hostname, IP, Tailscale address, or full `https://` reverse-proxy URL. Wildcards (`0.0.0.0`, `*`, `::`) are rejected at startup. |
-| `ORCA_PORT` | `6768` | Port Orca listens on inside the container. Compose publishes the same value on the host. |
+| `ORCA_PAIRING_ADDRESS` | `127.0.0.1` | **Set this.** Address clients dial. Hostname, IP, Tailscale address, or a full `https://` reverse-proxy URL. Wildcards are rejected at startup. |
+| `ORCA_PORT` | `6768` | Port Orca listens on inside the container. |
+| `ORCA_HOST_PORT` | `6768` | Port published on the host. Keep the `ports:` mapping in sync; the entrypoint uses this to build the advertised endpoint. |
+| `ORCA_HOME_DIR` | *(required in hostpaths)* | Absolute host path mounted at its own path and used as `HOME`. |
 | `ORCA_IMAGE` | `ghcr.io/ivan-cavero/orca-headless:latest` | Image to run. Change it if you forked or build locally. |
 | `PUID` / `PGID` | `1000` / `1000` | UID/GID the container runs as. **Build-time** arguments; see [Changing PUID/PGID](#changing-puidpgid). |
-| `ORCA_WORKSPACE` | `./workspace` | Host directory mounted at `/home/orca/workspace`. |
+| `ORCA_PROJECTS` | `./projects` | Host directory mounted at `/home/orca/projects` (named-volume model). |
 | `ORCA_SELINUX_LABEL` | *(empty)* | `:z` on SELinux hosts (Fedora/RHEL/CentOS). Empty elsewhere. |
 | `ORCA_JSON` | `true` | `true` emits the versioned single-line JSON contract; `false` emits the human-readable `Orca server ready` block. |
 | `ORCA_NO_SANDBOX` | `true` | Adds Chromium's `--no-sandbox`. Read [Security](#security) before changing. |
@@ -172,42 +317,24 @@ sh` sees them.
 
 ---
 
-## Volumes
-
-| Container path | Recommended | Why |
-| --- | --- | --- |
-| `/home/orca/.config` | named volume `orca-config` | All persisted state: projects, worktree metadata, terminal history, orchestration state, and paired-device keys. Orca uses **both** `~/.config/orca` and `~/.config/Orca`, so mount the parent directory. |
-| `/home/orca/workspace` | bind mount, e.g. `./workspace` | Your repositories. Orca records absolute paths in its state, so **keep this path stable** — moving it invalidates existing worktree entries. |
-
-Do not mount the same named volume at both `~/.config/orca` and `~/.config/Orca`.
-Docker would present the same directory contents at both paths, which is not what
-Orca expects. Mounting the parent is correct.
-
-Back up the state volume with:
-
-```bash
-docker run --rm -v orca-headless_orca-config:/data -v "$PWD":/backup \
-  alpine tar czf /backup/orca-state-$(date +%F).tgz -C /data .
-```
-
----
-
 ## Updating
 
 `orca serve` never updates itself — upstream is explicit that headless mode wires
-up no auto-updater. Upgrading means replacing the image and restarting.
+up no auto-updater, and the runtime reports
+`"remoteUpdateSupport": {"automatic": false, "reason": "updater-unavailable"}`.
+Upgrading means replacing the image and restarting.
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-Your state lives in the `orca-config` volume, not next to the binary, so
+Your state lives in the volumes (or the host directory), not next to the binary, so
 projects, worktrees, terminal history and paired-device keys survive. Mobile and
 web clients reconnect without re-pairing. New builds migrate older state on load.
 
-**Live processes do not survive.** A restart kills every terminal and agent in
-the container; conversations may be resumable, but in-flight commands are gone.
+**Live processes do not survive.** A restart kills every terminal and agent in the
+container; conversations may be resumable, but in-flight commands are gone.
 
 To pin a specific Orca release rather than track `latest`, build locally:
 
@@ -218,12 +345,12 @@ ORCA_VERSION=v1.4.206 docker compose -f docker-compose.yml -f docker-compose.bui
 ### Rolling back
 
 A newer build may rewrite `orca-data.json` in a newer schema, and an older build
-can then discard fields it does not recognise. Roll back the **state volume and
-the image together** — restoring the image alone is not safe:
+can then discard fields it does not recognise. Roll back the **state and the image
+together** — restoring the image alone is not safe:
 
 ```bash
 docker compose down
-# restore the orca-config volume from a backup taken before the upgrade
+# restore the state volume (or directory) from a backup taken before the upgrade
 ORCA_IMAGE=ghcr.io/ivan-cavero/orca-headless:1.4.200 docker compose up -d
 ```
 
@@ -233,8 +360,8 @@ ORCA_IMAGE=ghcr.io/ivan-cavero/orca-headless:1.4.200 docker compose up -d
 
 ### Non-root, no capabilities
 
-The container runs as an unprivileged user (`orca`, UID/GID 1000 by default),
-never as root, and `docker-compose.yml` additionally applies:
+The container runs as an unprivileged user (`orca`, UID/GID 1000 by default), never
+as root, and the compose files additionally apply:
 
 ```yaml
 security_opt:
@@ -244,8 +371,8 @@ cap_drop:
 ```
 
 Both were verified compatible with the default configuration. Combined with
-Docker's default seccomp profile and a read-only host filesystem outside the two
-mounted paths, that is a meaningfully smaller blast radius than running as root.
+Docker's default seccomp profile, that is a meaningfully smaller blast radius than
+running as root.
 
 ### About `--no-sandbox`
 
@@ -255,21 +382,20 @@ cosmetic:
 
 - Chromium's SUID sandbox helper (`chrome-sandbox`, root-owned, mode 4755) needs
   `CAP_SYS_ADMIN` to create its PID and network namespaces. Docker's default
-  capability bounding set does not include `CAP_SYS_ADMIN`, and the bounding set
-  is not regained through setuid. The helper therefore fails with
-  `Failed to move to new namespace`.
+  capability bounding set does not include `CAP_SYS_ADMIN`, and the bounding set is
+  not regained through setuid. The helper therefore fails with `Failed to move to
+  new namespace`.
 - The user-namespace sandbox is also unavailable by default: Docker's seccomp
   profile gates `unshare`/`setns` behind `CAP_SYS_ADMIN`, and on Ubuntu 23.10+
   hosts the kernel's AppArmor unprivileged-userns restriction blocks it too.
 - `no-new-privileges` disables setuid elevation outright, and `cap_drop: ALL`
-  empties the bounding set — so both hardening options above are mutually
-  exclusive with a working sandbox.
+  empties the bounding set — so both hardening options above are mutually exclusive
+  with a working sandbox.
 
-Upstream says the same thing from the other direction: running the AppImage as
-root requires `--no-sandbox`, and a dedicated unprivileged service user is
-preferred. This image does exactly that — it drops the Chromium sandbox but keeps
-the process unprivileged, which still bounds what a compromised renderer can
-touch.
+Upstream says the same thing from the other direction: running the AppImage as root
+requires `--no-sandbox`, and a dedicated unprivileged service user is preferred.
+This image drops the Chromium sandbox but keeps the process unprivileged, which
+still bounds what a compromised renderer can touch.
 
 **If you want the real sandbox**, drop the two hardening options and grant the
 capability the helper needs:
@@ -285,10 +411,9 @@ services:
 ```
 
 On an Ubuntu 24.04 host you may additionally need a seccomp profile that allows
-`unshare`/`setns`, or the kernel setting
-`kernel.apparmor_restrict_unprivileged_userns=0`. This is the path Playwright and
-Puppeteer document for non-root containers, and it trades security surface for
-security hardening — decide deliberately.
+`unshare`/`setns`, or `kernel.apparmor_restrict_unprivileged_userns=0`. This is the
+path Playwright and Puppeteer document for non-root containers; decide
+deliberately.
 
 ### Secrets are stored unencrypted
 
@@ -298,26 +423,24 @@ Orca logs this on every start in a container:
 [secrets] The OS keyring is unavailable, so secrets are stored unencrypted.
 ```
 
-There is no unlocked D-Bus session keyring (gnome-keyring/kwallet) in a headless
-container, so Orca falls back to storing secrets in the state volume in plaintext.
-Anyone who can read the `orca-config` volume can read them. Restrict access to
-that volume, and prefer environment-based credentials for the agent CLIs where
-the tool supports it.
+There is no unlocked D-Bus session keyring in a headless container, so Orca falls
+back to storing secrets in the state directory in plaintext. Anyone who can read
+that volume or directory can read them. Restrict access to it, and prefer
+environment-based credentials for the agent CLIs where the tool supports it.
 
 ### Do not expose the port publicly
 
 The runtime is a WebSocket control plane for terminals and agents. Upstream
-recommends Tailscale, WireGuard, a trusted LAN, SSH forwarding, or an
-authenticated tunnel. Port-forwarding `6768` to the internet is not a supported
-configuration.
+recommends Tailscale, WireGuard, a trusted LAN, SSH forwarding, or an authenticated
+tunnel. Port-forwarding `6768` to the internet is not a supported configuration.
 
 ---
 
 ## Running agent CLIs
 
-The image contains Orca and its dependencies, **not** the coding agents. Orca
-shells out to `codex`, `claude`, `opencode` and friends, so a missing binary
-shows up like this on startup:
+The image contains Orca and its dependencies, **not** the coding agents. Orca shells
+out to `codex`, `claude`, `opencode` and friends, so a missing binary shows up like
+this on startup:
 
 ```
 [codex-trust-grant] falling back to self-computed trust (reason=error, host=native)
@@ -365,8 +488,9 @@ orca-ide skills update --all
 ```
 
 The registered CLI is **`orca-ide`**, not `orca` — the name avoids shadowing the
-GNOME Orca screen reader. `orca serve` also writes a best-effort bare `orca`
-dispatcher into `~/.local/bin`.
+GNOME Orca screen reader. It resolves at `/opt/orca/bin/orca-ide` regardless of
+`HOME`. `orca serve` also writes a bare `orca` dispatcher into `$HOME/.local/bin`
+for the service user's own shell.
 
 ---
 
@@ -397,20 +521,21 @@ image is tested against.
 
 ### Changing PUID/PGID
 
-PUID and PGID are **build-time** values, so the container's `user:` must match
-the image's build arguments. If you change one and not the other, the state
-volume is owned by a different UID and Orca cannot persist anything — the
-entrypoint will warn you.
+PUID and PGID are **build-time** values, so the container's `user:` must match the
+image's build arguments. If you change one and not the other, the state directory is
+owned by a different UID and Orca cannot persist anything — the entrypoint warns you.
 
 ```bash
 PUID=1500 PGID=1500 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-If you already have a state volume from a previous UID, fix its ownership:
+Fix the ownership of an existing volume or host directory:
 
 ```bash
 docker compose down
 docker run --rm -v orca-headless_orca-config:/data alpine chown -R 1500:1500 /data
+# host-paths model instead:
+sudo chown -R 1500:1500 /srv/orca/home
 docker compose up -d
 ```
 
@@ -418,8 +543,8 @@ docker compose up -d
 
 ## Image size
 
-The published image is roughly **1.1 GB** on disk. That is normal for
-an Electron/Chromium application, and most of it is not this Dockerfile's doing:
+The published image is roughly **1.1 GB** on disk. That is normal for an
+Electron/Chromium application, and most of it is not this Dockerfile's doing:
 
 | Layer | Size | What it is |
 | --- | --- | --- |
@@ -427,12 +552,12 @@ an Electron/Chromium application, and most of it is not this Dockerfile's doing:
 | System libraries | ~470 MB | The Electron dependency set. `libgbm1` alone pulls `mesa-libgallium` → `libllvm20` (~178 MB), which cannot be dropped without breaking Electron. `git` pulls ~55 MB of Perl. |
 | Ubuntu base | ~81 MB | `ubuntu:24.04` |
 
-What this repository *did* optimise: a multi-stage build keeps the 192 MB
-AppImage out of the final image entirely, `--no-install-recommends` is used
-throughout, `apt-get update` and `install` share a single layer, and the apt
-lists are removed in that same layer. Aggressive trimming (dropping unused
-Electron locales, for example) was deliberately **not** applied — it saves about
-4% and risks breaking localisation for no real benefit.
+What this repository *did* optimise: a multi-stage build keeps the 192 MB AppImage
+out of the final image entirely, `--no-install-recommends` is used throughout,
+`apt-get update` and `install` share a single layer, and the apt lists are removed
+in that same layer. Aggressive trimming (dropping unused Electron locales, for
+example) was deliberately **not** applied — it saves about 4% and risks breaking
+localisation for no real benefit.
 
 ---
 
@@ -444,31 +569,45 @@ Honest accounting. The following were executed against the built image on
 | Check | Result |
 | --- | --- |
 | Image builds from a clean base | ✅ |
-| Container reaches `healthy` via its own `HEALTHCHECK` | ✅ ~15–35 s after start |
+| Container reaches `healthy` via its own `HEALTHCHECK` | ✅ ~15–20 s after start |
 | Orca emits `{"type":"orca_server_ready","schemaVersion":1,…}` | ✅ |
 | Human-readable `Orca server ready` block with `ORCA_JSON=false` | ✅ |
 | Healthcheck passes in both JSON and text modes | ✅ |
 | No FUSE, no `--privileged`, no `xvfb-run` | ✅ Orca starts its own Xvfb |
-| Binds `ws://0.0.0.0:6768`, reachable from the host | ✅ |
-| State survives destroy + recreate of the container | ✅ marker file persisted |
+| Web client served: `GET /web-index.html` → 200 `text/html`, `<title>Orca Web</title>` | ✅ |
+| WebSocket upgrade → `101 Switching Protocols` with a valid `Sec-WebSocket-Accept` | ✅ |
+| **Pairing end to end between two containers on a shared network** | ✅ `environment add` + `status --environment` returned the remote `runtimeId` with `connectionState: "connected"` |
+| Mobile pairing (`--mobile-pairing`) mints a `scope: "mobile"` code | ✅ |
+| **Worktree survives container destroy + recreate** (named volume) | ✅ checkout and an uncommitted file both survived; Orca still listed it |
+| **Host-path model: host `git worktree list` accepts the worktree** | ✅ not `prunable`; host can write into it |
+| `orca-ide` resolves on `PATH` in a running container | ✅ |
+| Pairing address → advertised endpoint, 7 cases incl. IPv6 and URLs | ✅ unit-tested |
+| Port published as `16774:6768` advertises `:16774`, not `:6768` | ✅ |
 | State survives `SIGKILL` followed by restart | ✅ stale `SingletonLock` recovered |
 | Graceful `SIGTERM` shutdown | ✅ exit 0, immediate |
 | `cap_drop: ALL` + `no-new-privileges` | ✅ still reaches ready |
-| Wildcard `ORCA_PAIRING_ADDRESS` rejected at startup | ✅ exit 1, clear message |
-| Non-numeric `ORCA_PORT` rejected at startup | ✅ exit 1 |
-| `docker-compose.yml` parses and runs end to end | ✅ via `podman-compose` |
-| Rootless Podman workspace fix (`keep-id` + `:z`) | ✅ verified writable |
+| Wildcard `ORCA_PAIRING_ADDRESS` and non-numeric ports rejected at startup | ✅ exit 1, message names the variable |
+| `docker-compose.yml` and `docker-compose.hostpaths.yml` run end to end | ✅ via `podman-compose` |
+| Rootless Podman fixes (`keep-id`, `:z`) | ✅ verified writable |
+| Unwritable state / workspaces / projects directory produces a warning | ✅ |
 
 **Not verified here, and worth knowing:**
 
-- The GHCR publish workflow has not been executed; GitHub Actions was not
+- **The GHCR publish workflow has never been executed.** GitHub Actions was not
   available in the environment where this repository was assembled. The action
   versions are current as of the pinned majors, and the `smoke-test` job mirrors
-  the exact steps verified above.
-- `arm64` is built by CI but was not tested on real hardware. `amd64` is the
+  the exact steps verified above — including the worktree-persistence check.
+- **`arm64` is built by CI but was not tested on real hardware.** `amd64` is the
   tested target.
-- Docker Engine itself was not used — Podman was. Compose semantics are shared,
-  but if you hit a Docker-specific difference, it is a bug worth reporting.
+- **Docker Engine itself was not used** — Podman was, because that is what the
+  environment had. Compose semantics are shared and the compose files avoid
+  engine-specific syntax, but a Docker-only difference would be a bug worth
+  reporting.
+- **No GUI client was run.** The pairing flow was verified with `orca-ide
+  environment add` / `status --environment`, which performs the same WebSocket
+  handshake the desktop and mobile clients perform, plus an HTTP fetch of the web
+  client and a raw WebSocket upgrade. That is strong evidence, not the same thing
+  as a human clicking **Add Server**.
 
 ---
 
@@ -484,59 +623,69 @@ docker compose logs orca | grep -o '"advertisedEndpoint":"[^"]*"' | tail -1
 
 That value is what the client dials. If it says `127.0.0.1`, or an address the
 client cannot route to, fix `.env` and `docker compose up -d`. Then confirm the
-port is actually reachable from outside:
+port is reachable from outside:
 
 ```bash
 nc -z <server-ip> 6768 && echo open
 ```
 
-Behind a reverse proxy, remember it must support WebSocket upgrade and route the
-advertised path.
+If you changed the published host port, set `ORCA_HOST_PORT` to match — the
+entrypoint derives the advertised port from it. See
+[Ports](#ports-and-why-the-entrypoint-rewrites-your-address).
 
 ### `spawn codex ENOENT` (or `spawn claude`)
 
 The agent CLI is not installed in the container. Orca starts and serves fine, but
-that agent cannot be launched. See
-[Running agent CLIs](#running-agent-clis). This is the single most common
-first-run surprise.
+that agent cannot be launched. See [Running agent CLIs](#running-agent-clis). This
+is the most common first-run surprise.
 
-### `dlopen(): error loading libfuse.so.2`
+### Worktrees disappear after `docker compose down`
 
-You are running an AppImage directly without FUSE. This image never hits that
-path — it extracts the AppImage at build time and runs the extracted tree, so
-`libfuse2` is not needed at all. If you see this while running the AppImage
-yourself, either install `libfuse2` (Ubuntu 22.04) / `libfuse2t64` (Ubuntu
-24.04) or use `--appimage-extract` once and run `squashfs-root/AppRun`.
+`/home/orca/orca` is not mounted. Orca creates worktree checkouts under
+`$HOME/orca/workspaces`, not inside the repository you import; the metadata lives in
+`.config` and survives, so Orca lists worktrees whose files are gone. Both bundled
+compose files mount it. See [Paths](#paths).
 
-### `Permission denied` on `/home/orca/workspace`
+### `Imported folder does not match the selected project identity`
 
-Two distinct causes:
+Orca identifies projects by their git remote. Add an `origin` and use the derived
+id (`github:owner/repo`). A folder with no remote cannot be imported.
 
-- **Rootless Podman.** Your host UID maps to container UID 0, so the bind mount
-  is root-owned inside the container. Use the Podman overlay:
+### `orca-ide: not found`
+
+`orca serve` registers the CLI into `$HOME/.local/bin`. The image also exposes it at
+the fixed path `/opt/orca/bin/orca-ide`, which is on `PATH` regardless of `HOME`. If
+you overrode `HOME` yourself, use that absolute path or add `$HOME/.local/bin` to
+`PATH`.
+
+### `Permission denied` on a mounted directory
+
+Two distinct causes, and the entrypoint names the directory it could not write:
+
+- **Rootless Podman.** Your host UID maps to container UID 0, so the bind mount is
+  root-owned inside the container. Add the Podman overlay to *either* compose file:
   `podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d`.
-- **SELinux host.** Unix permissions look correct but the label blocks writes.
-  Set `ORCA_SELINUX_LABEL=:z` in `.env`.
-
-The entrypoint prints a warning naming the directory when it detects this.
+- **SELinux host.** Unix permissions look correct but the label blocks writes. Set
+  `ORCA_SELINUX_LABEL=:z` in `.env`.
 
 ### State does not persist after `down`
 
-Check that the container actually got the volume:
+Check the container actually got the mounts:
 
 ```bash
 docker inspect orca --format '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}'
 ```
 
-If you overrode `user:` to a UID different from the image's `PUID`, the volume is
-owned by someone else and Orca silently fails to write. See
+You should see `/home/orca/.config` and `/home/orca/orca`. If you overrode `user:`
+to a UID different from the image's `PUID`, the directories are owned by someone
+else and Orca silently fails to write. See
 [Changing PUID/PGID](#changing-puidpgid).
 
 ### `Another Orca instance is already running for this userData profile`
 
 Orca exits with status **3** when something else already owns the same userData
 profile. Find the owner, stop it, and restart. If nothing owns it, the lock is
-stale — remove `SingletonLock` and `SingletonSocket` from the state volume:
+stale — remove `SingletonLock` and `SingletonSocket` from the state directory:
 
 ```bash
 docker compose down
@@ -545,8 +694,16 @@ docker run --rm -v orca-headless_orca-config:/data alpine \
 docker compose up -d
 ```
 
-This was tested: a `SIGKILL` leaves those files behind and Orca recovers from
-them on the next start. You should not normally need this.
+This was tested: a `SIGKILL` leaves those files behind and Orca recovers from them
+on the next start. You should not normally need this.
+
+### `dlopen(): error loading libfuse.so.2`
+
+You are running an AppImage directly without FUSE. This image never hits that path
+— it extracts the AppImage at build time and runs the extracted tree, so `libfuse2`
+is not needed at all. If you see this while running the AppImage yourself, either
+install `libfuse2` (Ubuntu 22.04) / `libfuse2t64` (Ubuntu 24.04) or use
+`--appimage-extract` once and run `squashfs-root/AppRun`.
 
 ### D-Bus errors fill the log
 
@@ -560,13 +717,12 @@ serve. The line that matters is `orca_server_ready`.
 ### `[secrets] The OS keyring is unavailable`
 
 Also expected — see [Security](#security). Secrets are stored unencrypted in the
-state volume.
+state directory.
 
 ### The container is `unhealthy` but clients work
 
 The healthcheck requires Orca's readiness line in `/tmp/orca-serve.log` **and** an
-open listener. If you changed `ORCA_EXTRA_ARGS` or set `ORCA_JSON` to something
-other than `true`/`false`, check the log:
+open listener. Check the log:
 
 ```bash
 docker compose exec orca cat /tmp/orca-serve.log
@@ -578,9 +734,9 @@ docker compose exec orca cat /tmp/orca-serve.log
 docker compose logs --tail=100 orca
 ```
 
-Exit status 3 means a profile lock (above). Any other immediate exit usually
-means a bad `ORCA_PAIRING_ADDRESS` or `ORCA_PORT` — both are validated at startup
-and fail fast with a message naming the variable.
+Exit status 3 means a profile lock (above). Any other immediate exit usually means
+a bad `ORCA_PAIRING_ADDRESS`, `ORCA_PORT` or `ORCA_HOME_DIR` — all are validated at
+startup and fail fast with a message naming the variable.
 
 ---
 
@@ -589,8 +745,8 @@ and fail fast with a message naming the variable.
 - [Orca](https://github.com/stablyai/orca) by Stably — the application this
   repository packages. MIT licensed.
 - [Headless Linux Server](https://github.com/stablyai/orca/blob/main/docs/reference/headless-linux-server.md)
-  — the upstream guide this image follows, and the source for the dependency
-  list, the `--appimage-extract` guidance, and the readiness contract.
+  — the upstream guide this image follows, and the source for the dependency list,
+  the `--appimage-extract` guidance, the readiness contract, and the state layout.
 - [Remote Orca Servers](https://www.onorca.dev/docs/remote-servers) — upstream
   documentation for `orca serve` and pairing.
 - [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html)
@@ -601,5 +757,5 @@ and fail fast with a message naming the variable.
 
 ## License
 
-[MIT](LICENSE). This repository packages Orca but is not affiliated with or
-endorsed by Stably.
+[MIT](LICENSE). This repository packages Orca but is not affiliated with or endorsed
+by Stably.
