@@ -260,6 +260,19 @@ glibc baseline for portability. That is luck rather than a guarantee:
   directories, credential stores — has to come along in the mount, or be reachable at
   the path the agent expects.
 
+### Read-only or read-write
+
+| Mounted | Use | Why |
+| --- | --- | --- |
+| Agent **binaries** | `:ro` | The container has no business modifying your host's binaries. Note that an agent which self-updates will fail to update — remount that one directory read-write if you want it to. |
+| Agent **config and credentials** | `:rw` if you want the container to share your host login and write sessions; `:ro` if you only want it to read them | Verified: with `:rw`, a file written from inside the container lands on the host with the host user's ownership. |
+| **Skills** | `:rw` if you want `orca skills install` to write there | With `:ro` the install fails. If you keep skills in the Orca volume instead — the default, `$HOME/.agents` — no mount is needed at all. |
+
+A sensible split: keep Orca's own state, worktrees, projects and skills in the volume,
+and mount only the agent binaries from the host. Or mount the agent configs too, if
+you want the agents inside the container to be authenticated as you already are on
+the host.
+
 Mounting is the right choice when you want the same agent, skills and configuration
 you already use on the host, kept in one place. Installing into the image is the
 right choice when you want the deployment to be reproducible from the image alone.

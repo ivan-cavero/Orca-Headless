@@ -125,6 +125,30 @@ the symptom is `Permission denied` on a directory that appears to be owned by yo
 The entrypoint warns when it detects any of this, naming the directory it could not
 write to, so a misconfiguration is loud rather than silent.
 
+### Changing userns_mode after the volume exists breaks it
+
+A named volume is seeded with the ownership produced by whatever UID mapping was in
+effect when it was first created. Adding or removing `userns_mode: keep-id` afterwards
+changes that mapping, so the existing volume becomes unwritable to the service user.
+
+The failure is not obvious. Orca does not report a permission problem; it dies with:
+
+```
+Fontconfig error: No writable cache directories
+[main_uncaught_exception] Error: Failed to get 'userData' path
+```
+
+and exits. If you see that after changing `userns_mode`, `PUID`/`PGID`, or `user:`,
+recreate the volume:
+
+```bash
+docker compose down
+docker volume rm orca-headless_orca-home
+docker compose up -d
+```
+
+State is lost with the volume, so back it up first if it mattered.
+
 ---
 
 ## ARM64 and Raspberry Pi
