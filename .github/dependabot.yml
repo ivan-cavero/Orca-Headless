@@ -1,0 +1,30 @@
+# Keeps the GitHub Actions pinned in .github/workflows current.
+#
+# The workflow pins action majors on purpose, but a pin that nobody revisits goes
+# stale silently — which is how the image ended up shipping an old Orca. This
+# covers the actions; the Orca version itself is checked by a warning step in the
+# lint job, because bumping it needs a verified container rather than a routine
+# merge.
+#
+# The base image is deliberately NOT tracked here. The ubuntu tag is coupled to
+# Orca's supported matrix and to the `t64` package names, so moving it is a
+# deliberate change with a build and a smoke test behind it, not an automated PR.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+    groups:
+      # One pull request for the docker/* actions rather than five: they are
+      # released together and reviewed together.
+      docker-actions:
+        patterns:
+          - "docker/*"

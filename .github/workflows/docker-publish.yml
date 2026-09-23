@@ -140,8 +140,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             ORCA_VERSION=${{ env.ORCA_VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # A named scope of its own. Three jobs exporting to the default scope
+          # thrash each other's entries, which is why the arm64 smoke job came
+          # back 0% cached and spent 4m49s rebuilding layers that already existed.
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,mode=max,scope=build
 
   smoke-test:
     # Runs the image for real, on a NATIVE runner for each architecture. The
@@ -180,10 +183,13 @@ jobs:
           tags: orca-headless:smoke
           build-args: |
             ORCA_VERSION=${{ env.ORCA_VERSION }}
-          # Reuses the layers the build job produced. The AppImage download and
-          # extraction are the expensive part and are cached.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Reads the build job's scope so the AppImage download and extraction
+          # are reused, plus its own history, and writes only to its own scope so
+          # the two smoke jobs and the build job cannot evict each other.
+          cache-from: |
+            type=gha,scope=build
+            type=gha,scope=smoke-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=smoke-${{ matrix.arch }}
 
       - name: Assert we really are on ${{ matrix.arch }}
         # Without this the whole job could silently be testing the wrong
