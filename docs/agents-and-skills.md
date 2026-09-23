@@ -188,8 +188,39 @@ working directory is the worktree checkout.
 
 ## Running agents from the host
 
-You do not have to bake the agent into the image. Bind-mount the directory that holds
-it and put it on `PATH`, and Orca finds it exactly as if it had been installed:
+You do not have to bake the agent into the image, and you usually do not need a pile
+of mounts either.
+
+### The short way: point the container at your home
+
+```bash
+# .env
+ORCA_HOME_DIR=/home/you     # your real home, mounted at its own path
+PUID=1001                   # `id -u` on the host
+PGID=1001                   # `id -g` on the host
+```
+
+That is the whole configuration. `HOME` becomes `/home/you`, the container mounts it
+at its own absolute path, and everything under it comes along: your agent binaries,
+their configuration, your skills. The entrypoint adds `$HOME/.local/bin`,
+`$HOME/.bun/bin` and `$HOME/.grok/bin` to `PATH`, so Orca detects what it finds there.
+
+Verified: with a home containing only `.bun/bin/opencode`, Orca detected `opencode`
+and targeted it for `skills install`.
+
+Two consequences:
+
+- **Orca's own state lives in that home too** — `/home/you/.config/orca` and
+  `/home/you/orca/workspaces`. If you already run `orca serve` by hand on that host,
+  **stop it first**: both processes would want the same userData profile, and the
+  container exits 3 with "Another Orca instance is already running".
+- Your real home is mounted, so anything the agents write there is written to your
+  real files. That is the point, but it is worth knowing.
+
+### The explicit way: separate state, chosen mounts
+
+If you want Orca's state somewhere else — `/srv/orca`, `/var/lib/orca` — and only the
+agent tooling from your home, mount each piece yourself:
 
 ```yaml
 services:

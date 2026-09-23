@@ -152,6 +152,29 @@ done
 
 ---
 
+## Variant: the whole home, three variables
+
+If you do not need Orca's state kept apart from your home, the shipped
+`docker-compose.yml` already does what this file does — set three variables and skip
+the rest:
+
+```bash
+# .env
+ORCA_HOME_DIR=/home/deploy
+PUID=1001
+PGID=1001
+```
+
+Everything under `/home/deploy` is mounted at its own path, `HOME` becomes
+`/home/deploy`, and the entrypoint puts `$HOME/.local/bin`, `$HOME/.bun/bin` and
+`$HOME/.grok/bin` on `PATH`. Agents, their configuration and your skills all work
+with no per-directory mounts.
+
+The tradeoff is that Orca's state lands in your real home
+(`/home/deploy/.config/orca`), mixed with everything else, and that a hand-run
+`orca serve` on the same host has to be stopped first or the container exits 3 on the
+profile lock.
+
 ## Variant: separate homes
 
 If you would rather keep Orca's home separate from the host account's, drop the

@@ -75,6 +75,22 @@ for pair in "ORCA_PORT:${ORCA_PORT}" "ORCA_HOST_PORT:${ORCA_HOST_PORT}"; do
   fi
 done
 
+# Agents installed under the home directory are only found if their bin directories
+# are on PATH. The image's PATH names /home/orca/.local/bin, which is wrong the
+# moment HOME is overridden — and overriding HOME is exactly what ORCA_HOME_DIR
+# does. Without this, an agent sitting in $HOME/.bun/bin is invisible to Orca and
+# the user has to reconstruct PATH by hand to work around it.
+#
+# Prepending here fixes detection for Orca itself. `docker compose exec` still sees
+# the image's PATH, so override PATH in compose too if you want it there.
+for agent_bin in "${orca_home}/.local/bin" "${orca_home}/.bun/bin" "${orca_home}/.grok/bin"; do
+  case ":${PATH}:" in
+    *":${agent_bin}:"*) ;;
+    *) PATH="${agent_bin}:${PATH}" ;;
+  esac
+done
+export PATH
+
 # Orca advertises this address to clients; it does not change the bind address.
 case "$ORCA_PAIRING_ADDRESS" in
   ''|'*'|'0.0.0.0'|'::')
