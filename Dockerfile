@@ -168,12 +168,14 @@ COPY --from=fetch /opt/orca/VERSION /opt/orca/VERSION
 
 COPY entrypoint.sh /usr/local/bin/orca-entrypoint
 COPY scripts/healthcheck.sh /usr/local/bin/orca-healthcheck
+COPY scripts/pairing-url.sh /usr/local/bin/orca-pairing-url
 
 # /opt/orca/bin is a stable CLI entry point, independent of HOME: `orca serve`
 # registers the CLI into $HOME/.local/bin, which moves when HOME is overridden.
 # Deliberately named `orca-ide` and not `orca` — upstream reserves the bare name
 # for the GNOME screen reader.
 RUN chmod 0755 /usr/local/bin/orca-entrypoint /usr/local/bin/orca-healthcheck \
+    /usr/local/bin/orca-pairing-url \
  && mkdir -p /opt/orca/bin \
  && ln -sfn /opt/orca/app/resources/bin/orca-ide /opt/orca/bin/orca-ide \
  && /opt/orca/bin/orca-ide --version
