@@ -1,0 +1,96 @@
+name: Clean up old image versions
+
+# Every push publishes an immutable `sha-<commit>` tag before the smoke test runs,
+# and the release tags are added to the same manifest afterwards. Old builds keep
+# their sha tag forever, so the package accumulates versions nobody will ever pull.
+#
+# Layers are shared between builds, so this is tag hygiene rather than storage
+# pressure — but the list becomes unusable to navigate after a few months.
+#
+# Deliberately conservative: a version is only eligible when EVERY tag it carries
+# starts with `sha-`. The promoted version always carries `latest`/`main`, so it can
+# never be selected — including the case where a publish failed and `latest` is
+# still pointing at an older build, which is exactly when deleting by age alone
+# would break the image for every user.
+
+on:
+  schedule:
+    # Mondays, 04:00 UTC.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would be deleted
+        type: boolean
+        default: true
+
+jobs:
+  cleanup:
+    name: Delete sha-only image versions
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Delete versions that only carry an immutable sha tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          PACKAGE: orca-headless
+          # Keep the most recent sha-only versions as a safety net: they cost
+          # nothing, since they share layers with the builds around them.
+          KEEP: '20'
+          # A manual run defaults to a dry run; the weekly schedule deletes.
+          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          echo "repository: ${OWNER}/${REPO}  package: ${PACKAGE}  keep: ${KEEP}  dry_run: ${DRY_RUN}"
+
+          versions=$(gh api --paginate --slurp \
+            "/repos/${OWNER}/${REPO}/packages/container/${PACKAGE}/versions?per_page=100" \
+            | jq 'add // []')
+
+          total=$(echo "$versions" | jq 'length')
+          echo "versions in the package: ${total}"
+
+          # Eligible only when the version has at least one tag and every tag is
+          # an immutable sha tag. A version with no tags at all is left alone too:
+          # it is not this job's business to guess why it is there.
+          candidates=$(echo "$versions" | jq -r --argjson keep "${KEEP}" '
+            map(select(
+              (.metadata.container.tags // []) as $t
+              | ($t | length) > 0 and ($t | all(startswith("sha-")))
+            ))
+            | sort_by(.updated_at) | reverse
+            | .[$keep:]
+            | .[] | "\(.id)\t\(.updated_at)\t\(.metadata.container.tags | join(","))"')
+
+          if [ -z "$candidates" ]; then
+            echo "nothing eligible: every version either carries a release tag or is within the newest ${KEEP}"
+            exit 0
+          fi
+
+          echo
+          echo "eligible for deletion:"
+          echo "$candidates" | while IFS=$'\t' read -r id updated tags; do
+            echo "  ${id}  ${updated}  ${tags}"
+          done
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo
+            echo "dry run: nothing was deleted"
+            exit 0
+          fi
+
+          echo
+          echo "$candidates" | while IFS=$'\t' read -r id updated tags; do
+            echo "deleting ${id} (${tags})"
+            gh api -X DELETE \
+              "/repos/${OWNER}/${REPO}/packages/container/${PACKAGE}/versions/${id}"
+          done
+
+          echo
+          echo "done"

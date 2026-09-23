@@ -183,6 +183,25 @@ and most findings have no upstream fix; failing would block every build on somet
 nobody can act on. Triage happens in the Security tab. See
 [SECURITY.md](../SECURITY.md).
 
+### Old image versions are cleaned up weekly
+
+Every push leaves behind an immutable `sha-<commit>` version. A scheduled workflow
+(`cleanup-image-versions.yml`) deletes the older ones.
+
+It is deliberately conservative: a version is only eligible when **every** tag it
+carries starts with `sha-`. The promoted version always carries `latest` or `main`,
+so it can never be selected — including the case where a publish failed and `latest`
+is still pointing at an older build, which is exactly when deleting by age alone
+would break the image for every user. The twenty most recent sha-only versions are
+kept as a safety net.
+
+Layers are shared between builds, so this is tag hygiene rather than storage
+pressure. A manual run defaults to a dry run:
+
+```bash
+gh workflow run cleanup-image-versions.yml -f dry_run=true
+```
+
 ---
 
 ## Testing a change
