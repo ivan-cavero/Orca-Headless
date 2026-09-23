@@ -16,7 +16,9 @@ env:
 jobs:
   lint:
     name: Lint scripts and compose files
-    runs-on: ubuntu-latest
+    # Pinned rather than `-latest`: the label is scheduled to move to Ubuntu 26,
+    # and a runner image change should be a deliberate commit.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -69,7 +71,7 @@ jobs:
 
   build:
     name: Build and push
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: lint
     permissions:
       contents: read
@@ -84,7 +86,9 @@ jobs:
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
-        # Must come before buildx: it registers the emulators for arm64 builds.
+        # Must come before buildx: it registers the emulators for the arm64 leg.
+        # Only the runtime stage needs emulation — the AppImage is extracted on
+        # the build platform, which is why this is affordable.
         uses: docker/setup-qemu-action@v4
 
       - name: Set up Buildx
@@ -125,11 +129,25 @@ jobs:
           cache-to: type=gha,mode=max
 
   smoke-test:
-    name: Smoke test the image
-    runs-on: ubuntu-latest
+    # Runs the image for real, on a NATIVE runner for each architecture. The
+    # arm64 leg is the one that matters for a Raspberry Pi: building an arm64
+    # image proves nothing about whether it starts.
+    name: Smoke test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     needs: build
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      # Sequential: two jobs exporting to the same GHA cache scope at the same
+      # time can conflict.
+      max-parallel: 1
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
@@ -138,18 +156,28 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build for the runner's platform
+      - name: Build for this runner's architecture
         uses: docker/build-push-action@v7
         with:
           context: .
           load: true
+          platforms: linux/${{ matrix.arch }}
           tags: orca-headless:smoke
           build-args: |
             ORCA_VERSION=${{ env.ORCA_VERSION }}
-          # Reuses the layers the build job just produced; the 192 MB AppImage
-          # download and the extraction are the expensive part and are cached.
+          # Reuses the layers the build job produced. The AppImage download and
+          # extraction are the expensive part and are cached.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Assert we really are on ${{ matrix.arch }}
+        # Without this the whole job could silently be testing the wrong
+        # architecture and still pass.
+        run: |
+          echo "runner: $(uname -m)"
+          image_arch=$(docker image inspect orca-headless:smoke --format '{{.Architecture}}')
+          echo "image architecture: ${image_arch}"
+          test "${image_arch}" = "${{ matrix.arch }}"
 
       - name: Start the container
         run: |
@@ -166,12 +194,12 @@ jobs:
         run: |
           for attempt in $(seq 1 60); do
             if docker exec orca-smoke /usr/local/bin/orca-healthcheck; then
-              echo "::notice::Orca reported readiness after ${attempt} probe(s)"
+              echo "::notice::Orca reported readiness after ${attempt} probe(s) on ${{ matrix.arch }}"
               exit 0
             fi
             sleep 5
           done
-          echo "::error::Orca never reported readiness within 300s"
+          echo "::error::Orca never reported readiness within 300s on ${{ matrix.arch }}"
           exit 1
 
       - name: Verify the CLI resolves and the port serves the web client
@@ -185,6 +213,13 @@ jobs:
         run: |
           docker exec orca-smoke orca-pairing-url
           docker exec orca-smoke orca-pairing-url | grep -q 'orca://pair?code='
+
+      - name: Verify the bundled skills print offline
+        # These ship inside the image and are what tells an agent how to drive
+        # Orca; if they stop resolving, agents inside the container go blind.
+        run: |
+          docker exec orca-smoke orca-ide skills get orchestration | head -5
+          test "$(docker exec orca-smoke orca-ide skills get orchestration | wc -l)" -gt 100
 
       - name: Verify a worktree lands in the persisted home
         # Orca creates checkouts under $HOME/orca/workspaces, not under the repo
