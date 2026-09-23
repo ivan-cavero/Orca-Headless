@@ -41,7 +41,9 @@ That is the whole setup. No host directory, no `mkdir`, no extra overlay file.
 ## Quick start
 
 Requirements: Docker Engine 20.10+ with the Compose plugin, or Podman 4+. A 64-bit
-Linux host (`amd64` or `arm64`). No GPU, no display, no FUSE.
+Linux host — **`amd64` or `arm64`** (Raspberry Pi 4/5 and other 64-bit ARM boards are
+supported; 32-bit ARM is not, because Orca publishes no build for it). No GPU, no
+display, no FUSE.
 
 ```bash
 git clone https://github.com/ivan-cavero/orca-headless.git

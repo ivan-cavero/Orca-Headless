@@ -127,6 +127,69 @@ write to, so a misconfiguration is loud rather than silent.
 
 ---
 
+## ARM64 and Raspberry Pi
+
+The image is published for **`linux/amd64` and `linux/arm64`**. The arm64 build is
+what runs on a Raspberry Pi 4, Pi 5, Pi 400, CM4, and any other 64-bit ARM board.
+
+### Which Pi, and which OS
+
+| | Supported |
+| --- | --- |
+| Pi 4 / Pi 5 / Pi 400 / CM4 with a **64-bit** OS (Raspberry Pi OS 64-bit, Ubuntu arm64) | ✅ |
+| Pi Zero, Pi 1, Pi 2, or any Pi running the **32-bit** Raspberry Pi OS | ❌ |
+| Pi 3 with the 64-bit OS | ✅ |
+
+Orca publishes only two Linux builds — `orca-linux.AppImage` (x86_64) and
+`orca-linux-arm64.AppImage`. **There is no 32-bit ARM build**, so armv7 cannot work
+no matter how the image is configured. Check what you have:
+
+```bash
+uname -m
+# aarch64  -> arm64, supported
+# armv7l   -> 32-bit, NOT supported
+# armv6l   -> 32-bit, NOT supported
+```
+
+On a Pi that reports `armv7l`, reinstall with the 64-bit Raspberry Pi OS. A Pi 3 or
+newer supports it; a Pi Zero and Pi 1 do not.
+
+### Memory
+
+This is guidance, not a measurement — no Pi was available to test on. Orca runs a
+full Chromium with software rendering, so:
+
+- **4 GB or more** — comfortable.
+- **2 GB** — likely workable for a few agents, with swap enabled. Expect pressure.
+- **1 GB** — not realistic for Chromium plus agents.
+
+`LIBGL_ALWAYS_SOFTWARE=1` is already set in the image, so no GPU is required. The Pi's
+GPU is not used.
+
+### How this is tested
+
+CI runs the image **natively on `ubuntu-24.04-arm`** on every push and pull request:
+it builds the arm64 image, asserts the resulting image architecture is really
+`arm64`, starts it, waits for the readiness contract, fetches the web client, checks
+the bundled skills resolve, and proves a worktree survives a container recreate.
+There is no emulation in that job, so a green run means the arm64 image genuinely
+starts on ARM hardware.
+
+That covers the container, not a real Pi: the CI runner is Ubuntu arm64, while a Pi
+runs Raspberry Pi OS with its own kernel and firmware. If something Pi-specific
+breaks, it is worth reporting.
+
+### Building arm64 yourself
+
+```bash
+docker buildx build --platform linux/arm64 -t orca-headless:arm64 .
+```
+
+You can do this on an amd64 machine: the AppImage is extracted with `unsquashfs` on
+the build platform rather than executed, so only the runtime stage needs emulation.
+
+---
+
 ## Running like a native install
 
 The short answer: **yes, with `ORCA_HOME_DIR` the container sees the same layout a

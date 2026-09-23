@@ -121,18 +121,25 @@ Honest accounting. The following were executed against the built image on **Podm
 | Orca opens the container's bash, not the host's shell | ✅ zsh and fish absent from the image |
 | Host dotfiles load only when `ORCA_HOME_DIR` points at that home | ✅ verified with a marker in a custom `.bashrc` |
 | Node 24 LTS works for `skills install` and `npm install -g` | ✅ v24.21.0, npm 11.19.0 |
+| The real **arm64** AppImage extracts without emulation | ✅ 3613 files, executable AppRun, `orca-ide` is aarch64 |
+| Orca publishes no 32-bit ARM build | ✅ only `orca-linux.AppImage` and `orca-linux-arm64.AppImage` exist |
 
 ### Not verified, and worth knowing
 
-- **The GHCR publish workflow has never been executed.** GitHub Actions was not
-  available in the environment where this repository was assembled. The action
-  versions are current as of the pinned majors, and the `smoke-test` job mirrors the
-  exact steps verified above — including the worktree-persistence check.
-- **`arm64` is built by CI but was not tested on real hardware.** `amd64` is the tested
-  target.
-- **Docker Engine itself was not used** — Podman was, because that is what the
-  environment had. Compose semantics are shared and the compose file avoids
-  engine-specific syntax, but a Docker-only difference would be a bug worth reporting.
+- **The arm64 container has not been started outside CI.** The arm64 AppImage was
+  downloaded and extracted on an amd64 host, which proves the packaging path but not
+  that the container boots on ARM. CI now runs the image natively on
+  `ubuntu-24.04-arm` on every push and pull request to cover exactly that — but that
+  job was added after the last green run, so its first result is still pending.
+- **No real Raspberry Pi has run this.** The CI runner is Ubuntu arm64; a Pi runs
+  Raspberry Pi OS with its own kernel and firmware. See
+  [ARM64 and Raspberry Pi](deployment.md#arm64-and-raspberry-pi).
+- **The GHCR publish workflow has only been executed once, and that run failed.**
+  The failure was in the multi-arch build, diagnosed as QEMU being unable to execute
+  the AppImage's `static-pie` runtime, and fixed by extracting with `unsquashfs`
+  instead. The subsequent run was green, including the arm64 leg of the build.
+- **Docker Engine itself was not used locally** — Podman was, because that is what
+  the development environment had. The CI runs use Docker Engine and are green.
 - **Dokploy was not tested.** Its behaviour described in these docs is taken from its
   own documentation, not from running it.
 - **No GUI client was run.** The pairing flow was verified with `orca-ide environment
@@ -140,6 +147,8 @@ Honest accounting. The following were executed against the built image on **Podm
   desktop and mobile clients perform, plus an HTTP fetch of the web client and a raw
   WebSocket upgrade. That is strong evidence, not the same thing as a human clicking
   **Add Server**.
+- **Nine of the ten supported agent harnesses were not installed.** Only `codex` was
+  installed for real. See [Agents and skills](agents-and-skills.md).
 
 ---
 
