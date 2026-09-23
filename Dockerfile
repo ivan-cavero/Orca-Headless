@@ -81,6 +81,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LIBGL_ALWAYS_SOFTWARE=1 \
     # Set explicitly so it survives a `user:` override in compose.
     HOME=/home/${ORCA_USER} \
+    # `orca serve` registers the CLI into $HOME/.local/bin, which moves when
+    # HOME is overridden. /opt/orca/bin is a fixed entry point that always
+    # resolves, so `orca-ide` works regardless of HOME.
+    PATH=/opt/orca/bin:/home/${ORCA_USER}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     ORCA_INSTALL_DIR=/opt/orca \
     ORCA_APP_DIR=/opt/orca/app \
     ORCA_LOG_FILE=/tmp/orca-serve.log \
@@ -146,8 +150,17 @@ RUN set -eux; \
     groupadd --gid "${PGID}" "${ORCA_USER}"; \
     useradd --uid "${PUID}" --gid "${PGID}" \
             --create-home --shell /bin/bash --no-log-init "${ORCA_USER}"; \
+    # These directories are mounted as named volumes in compose. Creating them
+    # here with the right ownership matters: Docker seeds a fresh named volume
+    # from the image, so a directory that does not exist would be created
+    # root-owned and the unprivileged user could not write to it. `install -d`
+    # applies -o/-g only to the paths it is given, so the parent has to be
+    # listed explicitly — otherwise /home/orca/orca ends up root-owned.
     install -d -o "${ORCA_USER}" -g "${PGID}" -m 0755 \
-      "/home/${ORCA_USER}/.config" "/home/${ORCA_USER}/workspace"; \
+      "/home/${ORCA_USER}/.config" \
+      "/home/${ORCA_USER}/orca" \
+      "/home/${ORCA_USER}/orca/workspaces" \
+      "/home/${ORCA_USER}/projects"; \
     id "${ORCA_USER}"
 
 COPY --from=fetch /opt/orca/app /opt/orca/app
@@ -155,7 +168,15 @@ COPY --from=fetch /opt/orca/VERSION /opt/orca/VERSION
 
 COPY entrypoint.sh /usr/local/bin/orca-entrypoint
 COPY scripts/healthcheck.sh /usr/local/bin/orca-healthcheck
-RUN chmod 0755 /usr/local/bin/orca-entrypoint /usr/local/bin/orca-healthcheck
+
+# /opt/orca/bin is a stable CLI entry point, independent of HOME: `orca serve`
+# registers the CLI into $HOME/.local/bin, which moves when HOME is overridden.
+# Deliberately named `orca-ide` and not `orca` — upstream reserves the bare name
+# for the GNOME screen reader.
+RUN chmod 0755 /usr/local/bin/orca-entrypoint /usr/local/bin/orca-healthcheck \
+ && mkdir -p /opt/orca/bin \
+ && ln -sfn /opt/orca/app/resources/bin/orca-ide /opt/orca/bin/orca-ide \
+ && /opt/orca/bin/orca-ide --version
 
 USER ${ORCA_USER}
 WORKDIR /home/${ORCA_USER}
