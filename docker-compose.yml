@@ -1,16 +1,17 @@
-# Orca Headless Docker — example deployment.
+# Orca Headless Docker — the deployment file.
 #
 #   cp .env.example .env      # then edit ORCA_PAIRING_ADDRESS
 #   docker compose up -d
 #
-# No host directory is required: state, worktrees and the projects folder all
-# default to named volumes.
+# That is the whole setup. No host directory, no extra overlay, no mkdir.
+#
+# Everything Orca owns — its state, its worktree checkouts and the repositories
+# you import — lives in ONE volume mounted at /home/orca.
 #
 # Full documentation: README.md
 
 services:
   orca:
-    # Published image. Point ORCA_IMAGE at your own GHCR path if you forked.
     image: ${ORCA_IMAGE:-ghcr.io/ivan-cavero/orca-headless:latest}
     container_name: orca
 
@@ -20,18 +21,29 @@ services:
     # Orca owns its Xvfb child; give it room to shut down cleanly.
     stop_grace_period: 30s
 
-    # Must match the image's build-time PUID/PGID, otherwise the mounted state
-    # directory is owned by a different uid and Orca cannot persist anything.
-    # See "Changing PUID / PGID" in the README before changing this.
+    # Must match the image's build-time PUID/PGID, otherwise the volume is owned
+    # by a different uid and Orca cannot persist anything. See the README.
     user: "${PUID:-1000}:${PGID:-1000}"
 
     ports:
       # host:container. Keep ORCA_HOST_PORT in sync with this mapping: the
       # entrypoint uses it to build the advertised pairing URL, so a mismatch
-      # here would hand clients an address that nothing is listening on.
+      # here would hand clients an address nothing is listening on.
       - "${ORCA_HOST_PORT:-6768}:${ORCA_PORT:-6768}"
 
     environment:
+      # Where Orca keeps everything. Leave unset to use the image's own home
+      # (/home/orca, backed by the volume below).
+      #
+      # Set it to an ABSOLUTE HOST PATH to turn the volume into a real host
+      # directory mounted at its own path — the container then sees exactly the
+      # layout a native Orca install would, and plain `git worktree list` on the
+      # host agrees with Orca. Example: ORCA_HOME_DIR=/srv/orca/home
+      #
+      # Do NOT set it to a relative path, and on Dokploy leave it unset (Dokploy
+      # cleans up absolute host paths between deployments).
+      HOME: "${ORCA_HOME_DIR:-/home/orca}"
+
       # Port Orca listens on inside the container.
       ORCA_PORT: "${ORCA_PORT:-6768}"
       # Port published on the host. Defaults to ORCA_PORT; only set it when the
@@ -40,7 +52,6 @@ services:
       # Address clients dial. NOT the bind address. Must be reachable from the
       # client: the host's LAN IP, DNS name, Tailscale address, or a full
       # reverse-proxy URL such as https://orca.example.com/runtime.
-      # Add an explicit :port only when a reverse proxy owns the port.
       ORCA_PAIRING_ADDRESS: "${ORCA_PAIRING_ADDRESS:-127.0.0.1}"
       # Emit the versioned single-line JSON readiness contract (recommended).
       ORCA_JSON: "${ORCA_JSON:-true}"
@@ -51,28 +62,27 @@ services:
       ORCA_EXTRA_ARGS: "${ORCA_EXTRA_ARGS:-}"
 
     volumes:
-      # 1. Orca's state: projects, worktree metadata, terminal history,
-      #    orchestration state and paired-device keys. Orca uses both
-      #    ~/.config/orca and ~/.config/Orca, so mount the whole directory.
-      - orca-config:/home/orca/.config
-
-      # 2. Worktree checkouts. Orca creates them under ~/orca/workspaces, NOT
-      #    under the repo you import. Without this volume every checkout is
-      #    destroyed when the container is recreated, while the metadata in
-      #    orca-config survives and points at paths that no longer exist.
-      - orca-workspaces:/home/orca/orca
-
-      # 3. Your repositories. Orca imports projects from here.
+      # One volume, everything Orca owns: ~/.config (state, pairing keys),
+      # ~/orca/workspaces (worktree checkouts) and ~/projects (your repos).
       #
-      #    Default is a named volume, so `up -d` works with no host setup at all.
-      #    Point ORCA_PROJECTS at a host directory to use real files instead:
-      #      ORCA_PROJECTS=./projects        (relative to this file)
-      #      ORCA_PROJECTS=/srv/repos        (absolute)
-      #    Orca records absolute container paths, so keep the target stable.
+      # Leave ORCA_HOME_DIR unset and this is a named Docker volume: zero host
+      # setup, and Dokploy's Volume Backups can snapshot it.
       #
-      #    On an SELinux host (Fedora, RHEL, CentOS) set ORCA_SELINUX_LABEL=:z
-      #    when mounting a host directory, or the container cannot write to it.
-      - ${ORCA_PROJECTS:-orca-projects}:/home/orca/projects${ORCA_SELINUX_LABEL:-}
+      # Set ORCA_HOME_DIR=/srv/orca/home and this becomes a bind mount of that
+      # directory onto itself, so host paths and container paths are identical.
+      # Create it first and own it:  sudo mkdir -p /srv/orca/home && sudo chown -R "$(id -u):$(id -g)" /srv/orca/home
+      #
+      # On an SELinux host (Fedora, RHEL, CentOS) also set ORCA_SELINUX_LABEL=:z,
+      # or the label blocks writes even though Unix permissions look correct.
+      - ${ORCA_HOME_DIR:-orca-home}:${ORCA_HOME_DIR:-/home/orca}${ORCA_SELINUX_LABEL:-}
+
+      # Optional: keep repositories outside the volume, on their own host path.
+      # Only meaningful while ORCA_HOME_DIR is unset, because it targets
+      # /home/orca/projects. Add it back if you want your repos somewhere you
+      # can reach directly:
+      #   - /srv/repos:/home/orca/projects
+      # On a rootless runtime this bind mount needs `userns_mode: keep-id` added
+      # to this service; the named volume above does not. See the README.
 
     # Mirrors the HEALTHCHECK baked into the image; uncomment to tune it here.
     healthcheck:
@@ -93,7 +103,4 @@ services:
       - ALL
 
 volumes:
-  orca-config:
-  orca-workspaces:
-  # Only used when ORCA_PROJECTS is left at its default.
-  orca-projects:
+  orca-home:
