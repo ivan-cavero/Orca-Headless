@@ -72,9 +72,11 @@ case "$ORCA_PAIRING_ADDRESS" in
   *)       ORCA_PAIRING_ADDRESS="${ORCA_PAIRING_ADDRESS}:${ORCA_HOST_PORT}" ;;
 esac
 
-# Orca stores its state under $HOME/.config and creates worktree checkouts under
-# $HOME/orca/workspaces. Both must be writable and mounted, or work is lost.
-for dir in "${HOME:-/home/orca}/.config" "${HOME:-/home/orca}/orca/workspaces" "${ORCA_PROJECTS:-}"; do
+# Orca stores its state under $HOME/.config, creates worktree checkouts under
+# $HOME/orca/workspaces, and imports projects from $HOME/projects. All three must
+# be writable, or work is lost. These are container paths — the host-side
+# ORCA_PROJECTS value is a mount source and says nothing about the container.
+for dir in "${HOME:-/home/orca}/.config" "${HOME:-/home/orca}/orca/workspaces" "${HOME:-/home/orca}/projects"; do
   [ -n "$dir" ] || continue
   if [ -d "$dir" ] && [ ! -w "$dir" ]; then
     log "WARNING: '${dir}' exists but is not writable by uid $(id -u)."
@@ -122,6 +124,9 @@ if [ "$ORCA_NO_SANDBOX" = "true" ]; then
 else
   log "  sandbox          : enabled (needs cap_add: [SYS_ADMIN] on the container)"
 fi
+log "  expected noise   : D-Bus and keyring messages below are normal on a"
+log "                     headless host. The line that matters is the readiness"
+log "                     contract; run 'orca-pairing-url' to print the link."
 
 # exec: Orca becomes PID 1 and receives SIGTERM/SIGINT directly.
 exec "$ORCA_LAUNCHER" "${args[@]}"
