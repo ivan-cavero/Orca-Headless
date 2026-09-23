@@ -55,6 +55,9 @@ services:
       - /home/deploy/.local:/home/deploy/.local:ro
       - /home/deploy/.agents:/home/deploy/.agents
       - /home/deploy/.config/opencode:/home/deploy/.config/opencode
+      # Note: mounting a directory that does not exist on the host makes Docker
+      # create it as a root-owned empty directory. Leave out anything you do not
+      # have, and keep it out of PATH too.
 
     healthcheck:
       test: ["CMD", "/usr/local/bin/orca-healthcheck"]
@@ -78,9 +81,17 @@ There is no top-level `volumes:` block: every mount is a host path.
 sudo mkdir -p /srv/orca/home
 sudo chown -R "$(id -u):$(id -g)" /srv/orca/home
 
-# Check which uid the agents actually belong to — it is not always 1000.
+# Which uid do the agents belong to? It is not always 1000, and this is the
+# number that has to go in PUID/PGID.
 id -u; id -g
+stat -c '%u:%g %n' ~/.bun ~/.local ~/.agents ~/.config/opencode 2>/dev/null
 ```
+
+**`PUID`/`PGID` must match the owner of the agent directories, not just the state
+directory.** The two are usually the same account, but if they are not, the container
+can read the agent directories and not write them: the mounts look fine, the agents
+start, and anything that writes — `orca skills install`, an agent saving a session —
+fails with a permission error inside a directory that appears to belong to you.
 
 Then set `PUID` and `PGID` in `.env` to those numbers, and
 `ORCA_PAIRING_ADDRESS` to the address your clients dial.
@@ -167,8 +178,8 @@ and has fewer paths to keep in sync.
 
 ## Before you deploy
 
-- [ ] `PUID`/`PGID` match `id -u` / `id -g` on the host, and `/srv/orca/home` is
-      owned by them.
+- [ ] `PUID`/`PGID` match `id -u` / `id -g` on the host, and both `/srv/orca/home`
+      **and the agent directories** are owned by them.
 - [ ] Every bind source exists on the host.
 - [ ] `ORCA_PAIRING_ADDRESS` is an address your clients can actually reach, and it is
       **not** `127.0.0.1`.
