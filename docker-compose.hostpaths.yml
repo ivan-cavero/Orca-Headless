@@ -4,6 +4,11 @@
 #
 # Use this INSTEAD of docker-compose.yml, not together with it.
 #
+# On a rootless runtime (rootless Podman, or Docker with userns-remap) add the
+# rootless overlay, or the container cannot write to the mounted directory:
+#
+#   podman-compose -f docker-compose.hostpaths.yml -f docker-compose.rootless.yml up -d
+#
 # Why you would want it: Orca stores absolute paths in its state, and it creates
 # worktree checkouts under $HOME/orca/workspaces. With named volumes those paths
 # exist only inside the container, so the files are invisible from the host and

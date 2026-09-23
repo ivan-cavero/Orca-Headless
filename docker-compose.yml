@@ -1,8 +1,10 @@
 # Orca Headless Docker — example deployment.
 #
 #   cp .env.example .env      # then edit ORCA_PAIRING_ADDRESS
-#   mkdir -p projects
 #   docker compose up -d
+#
+# No host directory is required: state, worktrees and the projects folder all
+# default to named volumes.
 #
 # Full documentation: README.md
 
@@ -60,16 +62,17 @@ services:
       #    orca-config survives and points at paths that no longer exist.
       - orca-workspaces:/home/orca/orca
 
-      # 3. Your repositories. Create it on the host first: mkdir -p ./projects
-      #    Orca records absolute paths, so keep the container path stable.
+      # 3. Your repositories. Orca imports projects from here.
       #
-      #    To keep the container path identical to the host path (recommended if
-      #    you also use git on the host), mount a host directory at its own
-      #    absolute path instead — see "Paths" in the README.
+      #    Default is a named volume, so `up -d` works with no host setup at all.
+      #    Point ORCA_PROJECTS at a host directory to use real files instead:
+      #      ORCA_PROJECTS=./projects        (relative to this file)
+      #      ORCA_PROJECTS=/srv/repos        (absolute)
+      #    Orca records absolute container paths, so keep the target stable.
       #
-      #    On an SELinux host (Fedora, RHEL, CentOS) set ORCA_SELINUX_LABEL=:z,
-      #    otherwise the container cannot write to this directory.
-      - ${ORCA_PROJECTS:-./projects}:/home/orca/projects${ORCA_SELINUX_LABEL:-}
+      #    On an SELinux host (Fedora, RHEL, CentOS) set ORCA_SELINUX_LABEL=:z
+      #    when mounting a host directory, or the container cannot write to it.
+      - ${ORCA_PROJECTS:-orca-projects}:/home/orca/projects${ORCA_SELINUX_LABEL:-}
 
     # Mirrors the HEALTHCHECK baked into the image; uncomment to tune it here.
     healthcheck:
@@ -92,3 +95,5 @@ services:
 volumes:
   orca-config:
   orca-workspaces:
+  # Only used when ORCA_PROJECTS is left at its default.
+  orca-projects:
