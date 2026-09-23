@@ -14,9 +14,43 @@ env:
   ORCA_VERSION: v1.4.206
 
 jobs:
+  lint:
+    name: Lint scripts and compose files
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check shell syntax
+        # A missing `)` in a case pattern shipped once; this catches it.
+        run: |
+          bash -n entrypoint.sh
+          sh -n scripts/healthcheck.sh
+
+      - name: ShellCheck
+        run: shellcheck -S warning entrypoint.sh scripts/healthcheck.sh
+
+      - name: Validate compose files
+        run: |
+          docker compose -f docker-compose.yml config >/dev/null
+          ORCA_HOME_DIR=/srv/orca docker compose -f docker-compose.hostpaths.yml config >/dev/null
+          docker compose -f docker-compose.build.yml config >/dev/null
+
+      - name: Assert ORCA_HOME_DIR is required
+        # hostpaths must refuse to start rather than silently mount a relative path.
+        run: |
+          if docker compose -f docker-compose.hostpaths.yml config >/dev/null 2>&1; then
+            echo "::error::docker-compose.hostpaths.yml accepted an unset ORCA_HOME_DIR"
+            exit 1
+          fi
+
   build:
     name: Build and push
     runs-on: ubuntu-latest
+    needs: lint
     permissions:
       contents: read
       packages: write
@@ -96,12 +130,21 @@ jobs:
 
       - name: Start the container
         run: |
+          mkdir -p /tmp/orca-projects/demo
+          git -C /tmp/orca-projects/demo init -q -b main
+          git -C /tmp/orca-projects/demo remote add origin https://github.com/example/demo.git
+          git -C /tmp/orca-projects/demo -c user.email=t@t.t -c user.name=t \
+            commit -q --allow-empty -m init
+
           docker run -d --name orca-smoke \
             --init \
             -e ORCA_PORT=6768 \
             -e ORCA_PAIRING_ADDRESS=127.0.0.1 \
             -e ORCA_NO_SANDBOX=true \
             -p 6768:6768 \
+            -v orca-smoke-config:/home/orca/.config \
+            -v orca-smoke-workspaces:/home/orca/orca \
+            -v /tmp/orca-projects:/home/orca/projects \
             orca-headless:smoke
 
       - name: Wait for the readiness contract
@@ -116,6 +159,43 @@ jobs:
           echo "::error::Orca never reported readiness within 300s"
           exit 1
 
+      - name: Verify the CLI resolves and the port serves the web client
+        run: |
+          docker exec orca-smoke orca-ide --version
+          curl -fsS http://127.0.0.1:6768/web-index.html | grep -qi '<title>Orca Web</title>'
+
+      - name: Verify a worktree is created under the workspaces volume
+        # Orca creates checkouts under $HOME/orca/workspaces, not under the repo
+        # it imports. If that path is not mounted, every checkout dies with the
+        # container while the metadata survives and points at nothing.
+        run: |
+          docker exec orca-smoke sh -c '
+            set -e
+            orca-ide project setup-existing-folder --project github:example/demo \
+              --host local --path /home/orca/projects/demo --kind git --json >/dev/null
+            orca-ide worktree create --repo path:/home/orca/projects/demo --name ci-wt --json >/dev/null
+            test -d /home/orca/orca/workspaces/demo/ci-wt
+            echo MARKER > /home/orca/orca/workspaces/demo/ci-wt/UNCOMMITTED.txt
+          '
+
+      - name: Restart the container and verify the worktree survives
+        run: |
+          docker rm -f orca-smoke
+          docker run -d --name orca-smoke \
+            --init \
+            -e ORCA_PORT=6768 -e ORCA_PAIRING_ADDRESS=127.0.0.1 -e ORCA_NO_SANDBOX=true \
+            -p 6768:6768 \
+            -v orca-smoke-config:/home/orca/.config \
+            -v orca-smoke-workspaces:/home/orca/orca \
+            -v /tmp/orca-projects:/home/orca/projects \
+            orca-headless:smoke
+          for attempt in $(seq 1 60); do
+            docker exec orca-smoke /usr/local/bin/orca-healthcheck >/dev/null 2>&1 && break
+            sleep 5
+          done
+          docker exec orca-smoke cat /home/orca/orca/workspaces/demo/ci-wt/UNCOMMITTED.txt
+          docker exec orca-smoke sh -c 'orca-ide worktree list --json | grep -q ci-wt'
+
       - name: Report container state
         if: always()
         run: |
@@ -124,4 +204,6 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f orca-smoke || true
+        run: |
+          docker rm -f orca-smoke || true
+          docker volume rm -f orca-smoke-config orca-smoke-workspaces || true
