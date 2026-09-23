@@ -158,12 +158,77 @@ agrees with Orca. Full reference:
 
 ---
 
+## A complete example
+
+A self-hosted deployment that keeps absolute host paths instead of named volumes, and
+shares the agent binaries and configuration from the host. Replace `/srv/orca`, the
+host account's home path, and `PUID`/`PGID`.
+
+```yaml
+services:
+  orca:
+    image: ghcr.io/ivan-cavero/orca-headless:latest
+    container_name: orca
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    # Must match the owner of the mounts below: check `id -u` / `id -g` on the host.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "${ORCA_HOST_PORT:-6768}:${ORCA_PORT:-6768}"
+    environment:
+      # HOME is the host account's home path, so every agent path inside the
+      # container matches the host exactly.
+      HOME: /home/deploy
+      ORCA_PORT: "${ORCA_PORT:-6768}"
+      ORCA_HOST_PORT: "${ORCA_HOST_PORT:-6768}"
+      ORCA_PAIRING_ADDRESS: "${ORCA_PAIRING_ADDRESS:?set this to the address your clients dial}"
+      ORCA_NO_SANDBOX: "true"
+      PATH: "/home/deploy/.bun/bin:/home/deploy/.local/bin:/opt/orca/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    volumes:
+      # Orca's state: projects, worktrees, pairing keys, skills.
+      - /srv/orca/home:/home/deploy
+      # Agent binaries and configuration, overlaid from the real host home at the
+      # same paths. Read-only, and only for directories the host actually has.
+      - /home/deploy/.bun:/home/deploy/.bun:ro
+      - /home/deploy/.local:/home/deploy/.local:ro
+      - /home/deploy/.agents:/home/deploy/.agents
+      - /home/deploy/.config/opencode:/home/deploy/.config/opencode
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/orca-healthcheck"]
+      interval: 15s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+```
+
+```bash
+sudo mkdir -p /srv/orca/home
+sudo chown -R "$(id -u):$(id -g)" /srv/orca/home
+id -u; id -g     # put these in PUID / PGID
+```
+
+Orca's state ends up under `/srv/orca/home`; the agent tooling stays the host's,
+unchanged. Binaries keep their own path because agent installers leave absolute
+symlinks; configuration goes under the container's `HOME` because that is where agents
+look for it.
+
+Full walkthrough, a variant with separate homes, the host-path checklist and the
+networking options: **[A complete example](docs/example-compose.md)**.
+
+---
+
 ## Documentation
 
 | | |
 | --- | --- |
 | [Configuration](docs/configuration.md) | Every environment variable, ports, paths, backups |
 | [Deployment](docs/deployment.md) | Storage modes, Dokploy, rootless, redeploying, updating, running like a native install |
+| [A complete example](docs/example-compose.md) | A full deployment with host paths and host agents, and the rules behind it |
 | [Pairing and connecting](docs/pairing.md) | The pairing link, desktop/browser/mobile clients, network rules, verifying a pairing |
 | [Agents and skills](docs/agents-and-skills.md) | Where skills live, how Orca finds agents, and why it cannot run the ones on your host |
 | [Security](docs/security.md) | The non-root model, why `--no-sandbox` is the default, stored secrets |
