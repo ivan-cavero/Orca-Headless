@@ -195,11 +195,39 @@ it and put it on `PATH`, and Orca finds it exactly as if it had been installed:
 services:
   orca:
     environment:
-      PATH: /home/orca/.bun/bin:/opt/orca/bin:/usr/local/bin:/usr/bin:/bin
+      # The agent paths are the HOST paths, because that is where the mount puts
+      # them. See "Mount binaries at their own path" below for why.
+      PATH: /home/you/.bun/bin:/home/you/.local/bin:/home/you/.grok/bin:/opt/orca/bin:/usr/local/bin:/usr/bin:/bin
     volumes:
-      - /home/you/.bun:/home/orca/.bun:ro,z     # the agent binary
-      - /home/you/.agents:/home/orca/.agents:ro,z  # your skills
+      # Binaries: mounted at their own absolute path on the host.
+      - /home/you/.bun:/home/you/.bun:ro,z
+      - /home/you/.local:/home/you/.local:ro,z
+      - /home/you/.grok:/home/you/.grok:ro,z
+      # Configuration and skills: at the container's home, where agents look.
+      - /home/you/.agents:/home/orca/.agents:ro,z
+      - /home/you/.config/opencode:/home/orca/.config/opencode:ro,z
 ```
+
+### Mount binaries at their own path, not at the container's home
+
+This is the part that is easy to get wrong, and it does not look like a path
+problem when it fails.
+
+Agent installers put a symlink in `~/.local/bin` or `~/.bun/bin` that points at a
+**versioned absolute path**:
+
+```
+/home/you/.local/bin/claude -> /home/you/.local/share/claude/versions/2.1.217
+```
+
+Mount that directory at `/home/orca/.local` and the symlink still says
+`/home/you/.local/...`, which does not exist inside the container. The symlink
+dangles, `command -v claude` finds nothing, and Orca reports no agent — while the
+binary is sitting right there. It reads like a libc problem and is not one.
+
+Mount the binary directories at **their own absolute path** and the symlinks resolve.
+Configuration and skills are different: agents look for those under `$HOME`, which is
+`/home/orca`, so those mounts target the container path.
 
 Verified against a real `opencode` (a Bun-compiled binary, 176 MB):
 
@@ -210,6 +238,10 @@ Verified against a real `opencode` (a Bun-compiled binary, 176 MB):
 | Orca targets it for `skills install` | ✅ `--agent opencode --agent universal` |
 | Orca reads the mounted `~/.agents/skills` | ✅ the host's skills listed as "Agent skills home" |
 | Container reaches `healthy` | ✅ zero warnings |
+| Several harnesses mounted at once | ✅ Orca detected `claude-code`, `grok`, `hermes-agent`, `opencode`, `pi` |
+| `claude` runs from the host mount | ✅ `2.1.217 (Claude Code)` |
+| The host's `~/.config/opencode` is readable | ✅ `AGENTS.md`, `commands/`, `node_modules/` |
+| Mounting at a different path breaks absolute symlinks | ✅ `claude` became "not found" until the mount used the host path |
 
 ### Why it works, and when it will not
 
