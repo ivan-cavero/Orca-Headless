@@ -17,7 +17,12 @@ ARG UBUNTU_VERSION=24.04
 # ---------------------------------------------------------------------------
 # Stage 1 — download and extract the Orca AppImage
 # ---------------------------------------------------------------------------
-FROM ubuntu:${UBUNTU_VERSION} AS fetch
+# Pinned to the BUILD platform, not the target one. The extraction only needs to
+# READ the squashfs, so it never executes the AppImage — which means a
+# cross-architecture build neither runs a foreign binary under QEMU nor pays for
+# emulating the 192 MB download. Executing the AppImage is what broke the
+# multi-arch CI build.
+FROM --platform=${BUILDPLATFORM} ubuntu:${UBUNTU_VERSION} AS fetch
 
 # Pin a concrete release for reproducible builds; `latest` is accepted but not
 # recommended. CI overrides this with the version it was told to publish.
@@ -28,7 +33,8 @@ ARG TARGETARCH
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl file \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl file squashfs-tools \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/orca
@@ -46,26 +52,38 @@ RUN set -eux; \
     fi; \
     echo "Downloading ${url}"; \
     curl -fL --retry 5 --retry-delay 3 --retry-all-errors -o /opt/orca/orca.AppImage "${url}"; \
-    chmod 0755 /opt/orca/orca.AppImage; \
     LC_ALL=C file /opt/orca/orca.AppImage | grep -q 'ELF .* executable'; \
     \
-    # Docker normally has no FUSE device. `--appimage-extract` reads the file
-    # directly, so it needs neither FUSE nor a privileged container.
-    /opt/orca/orca.AppImage --appimage-extract; \
-    test -x /opt/orca/squashfs-root/AppRun; \
-    mv /opt/orca/squashfs-root /opt/orca/app; \
+    # Extract without executing. An AppImage is an ELF runtime followed by a
+    # squashfs image, so unsquashfs can read it directly — no FUSE, and no
+    # foreign-architecture execution. The squashfs magic can occur by accident
+    # inside the runtime, so every candidate offset is validated by extracting
+    # from it; the wrong one fails immediately.
+    squashfs_offset=""; \
+    for candidate in $(grep -abo 'hsqs' /opt/orca/orca.AppImage | cut -d: -f1); do \
+      if unsquashfs -q -o "${candidate}" -d /opt/orca/app /opt/orca/orca.AppImage >/dev/null 2>&1; then \
+        squashfs_offset="${candidate}"; \
+        break; \
+      fi; \
+      rm -rf /opt/orca/app; \
+    done; \
+    [ -n "${squashfs_offset}" ] || { echo "FATAL: no squashfs superblock found in the AppImage" >&2; exit 1; }; \
+    echo "Extracted the squashfs payload at offset ${squashfs_offset}"; \
+    test -x /opt/orca/app/AppRun; \
     rm -f /opt/orca/orca.AppImage; \
     printf '%s\n' "${ORCA_VERSION}" > /opt/orca/VERSION; \
-    \
-    # `--appimage-extract` writes squashfs-root as drwx------ owned by the
-    # extracting user. Without this, the runtime user cannot traverse it and the
-    # container dies before Electron starts.
-    chmod -R a+rX /opt/orca/app; \
-    \
-    # Orca is MIT, and the AppImage does not ship Orca's own copyright notice.
-    # MIT requires the notice to accompany copies, so fetch the exact text for
-    # the release being packaged rather than trusting the bundle to carry it.
-    if [ "${ORCA_VERSION}" = "latest" ]; then orca_ref="main"; else orca_ref="${ORCA_VERSION}"; fi; \
+    chmod -R a+rX /opt/orca/app
+
+# Attribution, in its own layer on purpose: this text changes far more often than
+# the 192 MB download above it, and sharing a RUN would invalidate the download
+# every time the license handling is touched.
+#
+# Orca is MIT, and the AppImage does not ship Orca's own copyright notice. MIT
+# requires the notice to accompany copies, so fetch the exact text for the
+# release being packaged rather than trusting the bundle to carry it.
+ARG ORCA_VERSION_LICENSE=${ORCA_VERSION}
+RUN set -eux; \
+    if [ "${ORCA_VERSION_LICENSE}" = "latest" ]; then orca_ref="main"; else orca_ref="${ORCA_VERSION_LICENSE}"; fi; \
     curl -fL --retry 3 --retry-all-errors \
       "https://raw.githubusercontent.com/stablyai/orca/${orca_ref}/LICENSE" \
       -o /opt/orca/LICENSE.orca; \
