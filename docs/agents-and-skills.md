@@ -242,6 +242,8 @@ Verified against a real `opencode` (a Bun-compiled binary, 176 MB):
 | `claude` runs from the host mount | ✅ `2.1.217 (Claude Code)` |
 | The host's `~/.config/opencode` is readable | ✅ `AGENTS.md`, `commands/`, `node_modules/` |
 | Mounting at a different path breaks absolute symlinks | ✅ `claude` became "not found" until the mount used the host path |
+| Orca detects a harness purely from `PATH` | ✅ stubs for all ten names → nine detected and targeted |
+| An unwritable home fails fast with an actionable message | ✅ instead of Electron's `Failed to get 'userData' path`, exit 132 |
 
 ### Why it works, and when it will not
 

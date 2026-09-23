@@ -131,15 +131,22 @@ A named volume is seeded with the ownership produced by whatever UID mapping was
 effect when it was first created. Adding or removing `userns_mode: keep-id` afterwards
 changes that mapping, so the existing volume becomes unwritable to the service user.
 
-The failure is not obvious. Orca does not report a permission problem; it dies with:
+The failure used to be silent and misleading. Orca does not report a permission
+problem; it died with:
 
 ```
 Fontconfig error: No writable cache directories
 [main_uncaught_exception] Error: Failed to get 'userData' path
 ```
 
-and exits. If you see that after changing `userns_mode`, `PUID`/`PGID`, or `user:`,
-recreate the volume:
+and exited 132. Worse, the entrypoint's per-directory warnings did not fire: with the
+home directory owned by a stranger it is not traversable, so `$HOME/.config` does not
+even resolve, and every check was skipped.
+
+The entrypoint now tests the home directory itself and stops with a message naming
+the cause, the mode and owner it found, and the fix — instead of letting Electron
+crash. If you see that message after changing `userns_mode`, `PUID`/`PGID`, or
+`user:`, recreate the volume:
 
 ```bash
 docker compose down

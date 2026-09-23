@@ -35,6 +35,36 @@ fail() { printf '[entrypoint] FATAL: %s\n' "$*" >&2; exit 1; }
 
 [ -x "$ORCA_LAUNCHER" ] || fail "Orca launcher not found or not executable: ${ORCA_LAUNCHER}"
 
+# The home directory has to be usable before anything else is worth checking.
+#
+# If it is not traversable, the per-directory checks below see nothing, pass, and
+# Orca then dies inside Electron with "Failed to get 'userData' path" and exit 132 —
+# an error that names no permission and points nowhere near the cause.
+#
+# It happens after changing userns_mode, PUID/PGID or user: on an existing volume:
+# a named volume keeps the ownership of whatever UID mapping created it, so the new
+# mapping finds it owned by a stranger.
+orca_home="${HOME:-/home/orca}"
+if [ ! -d "$orca_home" ]; then
+  fail "the container's home directory '${orca_home}' does not exist."
+elif [ ! -x "$orca_home" ] || [ ! -w "$orca_home" ]; then
+  fail "'${orca_home}' is not usable by uid $(id -u) (mode $(stat -c '%a' "$orca_home" 2>/dev/null || echo '?'), owner $(stat -c '%u:%g' "$orca_home" 2>/dev/null || echo '?')).
+
+       Orca would start and then crash with 'Failed to get userData path' and exit
+       132, which says nothing about permissions. Stopping here instead.
+
+       This normally means the volume was created under a different UID mapping.
+       Changing userns_mode, PUID, PGID or user: after the volume exists leaves it
+       owned by the previous mapping.
+
+       Fix it by recreating the volume — this loses Orca's state, so back it up
+       first if it matters:
+
+         docker compose down
+         docker volume rm <project>_orca-home
+         docker compose up -d"
+fi
+
 for pair in "ORCA_PORT:${ORCA_PORT}" "ORCA_HOST_PORT:${ORCA_HOST_PORT}"; do
   name="${pair%%:*}"; value="${pair#*:}"
   case "$value" in
