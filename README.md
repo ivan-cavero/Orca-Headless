@@ -44,11 +44,14 @@ What you get:
 ## Contents
 
 - [Quick start](#quick-start)
+- [Getting the pairing link](#getting-the-pairing-link)
+- [Reading the console](#reading-the-console)
 - [Choose a deployment model](#choose-a-deployment-model)
 - [Connecting a client](#connecting-a-client)
 - [Paths](#paths)
+- [Running like a native install](#running-like-a-native-install)
 - [Configuration](#configuration)
-- [Updating](#updating)
+- [Redeploying](#redeploying)
 - [Security](#security)
 - [Running agent CLIs](#running-agent-clis)
 - [Building the image yourself](#building-the-image-yourself)
@@ -71,22 +74,31 @@ cd orca-headless
 cp .env.example .env
 $EDITOR .env                     # at minimum: ORCA_PAIRING_ADDRESS
 
-mkdir -p projects                # do this first, so you own the directory
 docker compose up -d
+```
+
+No host directory is needed. State, worktree checkouts and the projects folder all
+default to named volumes, so the command above is the whole setup.
+
+Then get your pairing link:
+
+```bash
+docker compose exec orca orca-pairing-url
 ```
 
 ### With rootless Podman
 
-Add the Podman overlay — **always**, with either compose file. Rootless Podman maps
-your host UID to container UID 0, so any bind-mounted directory looks root-owned
-inside the container and the unprivileged `orca` user cannot write to it:
+Add the rootless overlay — **always**, with either compose file. A rootless runtime
+maps your host UID to container UID 0, so any bind-mounted directory looks
+root-owned inside the container and the unprivileged `orca` user cannot write to it:
 
 ```bash
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d
+podman-compose -f docker-compose.yml -f docker-compose.rootless.yml up -d
 ```
 
 On an SELinux host (Fedora, RHEL, CentOS) also set `ORCA_SELINUX_LABEL=:z` in
-`.env`, or the label blocks writes even when Unix permissions look correct.
+`.env` when you mount a host directory, or the label blocks writes even when Unix
+permissions look correct.
 
 The entrypoint warns when it detects either problem, naming the directory it could
 not write to, so a misconfiguration is loud rather than silent.
@@ -94,24 +106,95 @@ not write to, so a misconfiguration is loud rather than silent.
 ### Check it came up
 
 ```bash
-docker compose logs -f orca
-```
-
-Within a few seconds Orca prints its readiness contract:
-
-```json
-{"type":"orca_server_ready","schemaVersion":1,"runtimeId":"...",
- "boundEndpoint":"ws://0.0.0.0:6768",
- "advertisedEndpoint":"ws://100.64.1.20:6768",
- "pairing":{"available":true,"url":"orca://pair?code=...","scope":"runtime"}}
-```
-
-(The real output is a single compact line.)
-
-```bash
 docker compose ps
 # NAME   STATUS
 # orca   Up 2 minutes (healthy)
+```
+
+---
+
+## Getting the pairing link
+
+Orca mints the pairing link at startup and writes it to its readiness output.
+**There is no CLI command to mint one against a running runtime** — the log is the
+only source, so this image ships a helper that reads it:
+
+```bash
+docker compose exec orca orca-pairing-url
+```
+
+```
+Pairing scope : runtime
+Bound         : ws://0.0.0.0:6768
+Advertised    : ws://10.0.0.5:6768
+
+Pairing URL (paste into Orca: Settings -> Remote Orca Servers -> Add Server):
+
+  orca://pair?code=eyJ2IjoyLCJlbmRwb2ludCI6IndzOi8vMTAuMC4wLjU6Njc2OCIs...
+
+Browser URL (open it directly, the pairing code is embedded):
+
+  http://10.0.0.5:6768/web-index.html#pairing=orca%3A%2F%2Fpair%3Fcode%3D...
+```
+
+Or read it straight from the logs, which is the same data:
+
+```bash
+docker compose logs orca | grep -o 'orca://pair?code=[^"]*' | tail -1
+```
+
+The link is **stable**. It is derived from device credentials stored in the state
+directory, so it is byte-identical across `docker compose restart` and across a
+full `down` + `up`. A client that already paired stays paired through a redeploy,
+and you can re-read the same link any time.
+
+It changes only when the state is destroyed — `docker compose down -v` — or when
+you revoke the grant. After either, clients must pair again.
+
+If you need a fresh link without losing state, revoke the old grant from the
+client's **Shared Server Access** list and restart the container.
+
+---
+
+## Reading the console
+
+A first run looks alarming. Here is every line, and which ones matter.
+
+```
+[entrypoint] starting Orca server              <- informational, from this image
+[entrypoint]   listen port      : 6768
+[entrypoint]   published port   : 6768
+[entrypoint]   pairing address  : 10.0.0.5:6768
+[entrypoint]   expected noise   : ...          <- tells you the next lines are fine
+
+ERROR:dbus/bus.cc:406] Failed to connect to the bus: ...   <- NOISE, harmless
+ERROR:dbus/bus.cc:406] Failed to connect to the bus: ...   <- NOISE, harmless
+[secrets] The OS keyring is unavailable, so secrets are stored unencrypted.
+                                                           <- REAL, read Security
+ERROR:dbus/object_proxy.cc:572] Failed to call method: ... <- NOISE, harmless
+[codex-trust-grant] falling back to self-computed trust ... Error: spawn codex ENOENT
+                                                           <- REAL, no Codex installed
+[serve] orca CLI install: installed (/home/orca/.local/bin/orca-ide)
+[serve] bare orca dispatcher installed: ...
+{"type":"orca_server_ready","schemaVersion":1,...}          <- THIS IS THE ONE
+```
+
+| Line | Meaning |
+| --- | --- |
+| `Failed to connect to the bus` / `org.freedesktop.DBus` | **Harmless.** There is no session D-Bus in the container. Orca does not need one to serve. |
+| `[secrets] The OS keyring is unavailable` | **Real.** No keyring, so secrets are stored unencrypted in the state directory. See [Security](#security). |
+| `spawn codex ENOENT` / `spawn claude` | **Real but non-fatal.** The agent CLI is not installed, so that agent cannot run. Orca still serves. See [Running agent CLIs](#running-agent-clis). |
+| `[serve] orca CLI install: installed` | **Informational.** The CLI is now on `PATH` inside the container. |
+| `Another Orca instance is already running` | **Fatal, exit 3.** A profile lock. See [Troubleshooting](#another-orca-instance-is-already-running-for-this-userdata-profile). |
+| `{"type":"orca_server_ready",...}` | **The readiness contract.** Orca is serving. This is what the healthcheck waits for. |
+
+The line that decides whether the container is usable is the last one. Everything
+before it is either noise or a warning you can act on later.
+
+To see only what matters:
+
+```bash
+docker compose logs orca | grep -E 'orca_server_ready|\[entrypoint\]|secrets|ENOENT'
 ```
 
 ---
@@ -160,19 +243,39 @@ not together with it.
 
 ## Connecting a client
 
-Grab the pairing URL from the logs:
+Get the link first — see [Getting the pairing link](#getting-the-pairing-link).
+
+- **Desktop app** — **Settings → Remote Orca Servers → Add Server**, paste the
+  pairing URL.
+- **Browser** — open the `Browser URL` instead; the pairing code is already
+  embedded in the fragment, so it connects without any copy-paste.
+- **Mobile** — see below. It needs a different kind of link.
+
+### Mobile pairing is a separate mode
+
+`--mobile-pairing` does not add a second link — it **replaces** the runtime link
+with a mobile-scoped one. Upstream is explicit: it prints a mobile-scoped QR/link
+*"instead of the default runtime-environment pairing link"*.
 
 ```bash
-docker compose logs orca | grep -o 'orca://pair?code=[^"]*' | tail -1
+# in .env
+ORCA_EXTRA_ARGS=--mobile-pairing
+ORCA_JSON=false          # required for the scannable QR; JSON mode reports qr:null
 ```
 
-Then:
+Restart, then scan the QR from the logs with the Orca Mobile app's **Pair** flow,
+or copy the link that `orca-pairing-url` prints.
 
-- **Desktop app** — **Settings → Remote Orca Servers → Add Server**, paste the URL.
-- **Browser** — open the `webClientUrl` from the readiness line; it is the same
-  pairing code pre-encoded as a fragment.
-- **Mobile** — start with `ORCA_EXTRA_ARGS=--mobile-pairing`, which mints a code
-  with `"scope":"mobile"` for the Orca Mobile app's **Pair** flow.
+Two consequences worth knowing, both verified:
+
+- A **desktop client cannot use a mobile-scoped code.** `orca-ide environment add`
+  accepts it but the connection fails (`runtimeId: null`).
+- So you get **one or the other per run.** Leave `ORCA_EXTRA_ARGS` empty for
+  desktop and browser clients; set it when you are pairing a phone. The
+  `orca-pairing-url` helper tells you which kind of link you are looking at.
+
+`--no-pairing` disables pairing entirely if the runtime should not be reachable at
+all.
 
 ### The one thing that breaks connections
 
@@ -248,7 +351,7 @@ Three paths matter, and each has one job.
 | --- | --- | --- | --- |
 | `/home/orca/.config` | Orca's state: projects, worktree metadata, terminal history, orchestration state, paired-device keys. Orca uses **both** `~/.config/orca` and `~/.config/Orca`. | yes | yes |
 | `/home/orca/orca/workspaces` | The actual worktree checkouts. **Orca creates these here, not inside the repo you import.** | yes | yes |
-| `/home/orca/projects` (or your own path) | The repositories you import into Orca. | yes | yes |
+| `/home/orca/projects` (or your own path) | The repositories you import into Orca. Defaults to a named volume, so it works with no host folder; point `ORCA_PROJECTS` at a host directory to use real files. | yes | yes |
 
 Two mistakes are easy to make and expensive:
 
@@ -279,6 +382,12 @@ This is where the deployment model shows up. With `docker-compose.yml` you type
 path you would use on the host. Orca records whatever you type, so pick a stable
 container path and keep it.
 
+`repo add` is a shorter equivalent when you only need the folder registered:
+
+```bash
+docker compose exec orca orca-ide repo add --path /home/orca/projects/repo --json
+```
+
 ### Backing up
 
 ```bash
@@ -289,6 +398,61 @@ docker run --rm -v orca-headless_orca-config:/data -v "$PWD":/backup \
 # host-paths model
 sudo tar czf orca-state-$(date +%F).tgz -C /srv/orca/home .config orca
 ```
+
+---
+
+## Running like a native install
+
+The short answer: **yes, with the host-path deployment the container sees the same
+layout a native install would, and the only thing that matters is the UID/GID, not
+the user name.**
+
+A native Orca install on a Linux server puts everything under the user's home:
+
+```
+/home/dev/.config/orca            state
+/home/dev/.config/Orca            state (Orca uses both names)
+/home/dev/orca/workspaces/...     worktree checkouts
+```
+
+Point the host-path deployment at that same home and it is identical:
+
+```yaml
+# .env
+ORCA_HOME_DIR=/home/dev
+PUID=1000          # the uid of `dev` on the host
+PGID=1000          # the gid of `dev` on the host
+```
+
+Inside the container `HOME` is `/home/dev`, Orca writes to `/home/dev/.config/orca`
+and creates worktrees under `/home/dev/orca/workspaces`, exactly as it would if you
+had installed it with `curl | bash`. Anything you can do from the host shell you can
+do to the same files, and vice versa.
+
+### About the user name
+
+The container's internal account is called `orca` by default, and that name is
+**cosmetic**. What the filesystem actually checks is the numeric UID/GID:
+
+| | Why it matters |
+| --- | --- |
+| **PUID / PGID** | Decides who owns the files. Must match the host user that owns `ORCA_HOME_DIR`, or the container cannot write. |
+| **`ORCA_USER`** | Just the label in `/etc/passwd`. Changing it does not change file ownership. |
+| **`HOME`** | Decides *where* Orca puts state and worktrees. This is the one that must match the host path. |
+
+So if your server user is `dev` with uid 1000, you do **not** need to rename
+anything: `PUID=1000` and `ORCA_HOME_DIR=/home/dev` already give you a deployment
+that behaves natively. The `orca` label never appears in a path you care about.
+
+If you want cosmetic parity too — the account genuinely named `dev`, with
+`/home/dev` as its passwd home — build the image with:
+
+```bash
+docker build --build-arg ORCA_USER=dev --build-arg PUID=1000 --build-arg PGID=1000 -t orca-headless:dev .
+```
+
+That is the only way to change the name, because a non-root process cannot add
+itself to `/etc/passwd`. It is not required for anything to work.
 
 ---
 
@@ -305,7 +469,7 @@ Every variable is optional except `ORCA_HOME_DIR` in the host-paths model. Copy
 | `ORCA_HOME_DIR` | *(required in hostpaths)* | Absolute host path mounted at its own path and used as `HOME`. |
 | `ORCA_IMAGE` | `ghcr.io/ivan-cavero/orca-headless:latest` | Image to run. Change it if you forked or build locally. |
 | `PUID` / `PGID` | `1000` / `1000` | UID/GID the container runs as. **Build-time** arguments; see [Changing PUID/PGID](#changing-puidpgid). |
-| `ORCA_PROJECTS` | `./projects` | Host directory mounted at `/home/orca/projects` (named-volume model). |
+| `ORCA_PROJECTS` | `orca-projects` | Where your repositories live: a named volume by default, or a host directory (`./projects`, `/srv/repos`). |
 | `ORCA_SELINUX_LABEL` | *(empty)* | `:z` on SELinux hosts (Fedora/RHEL/CentOS). Empty elsewhere. |
 | `ORCA_JSON` | `true` | `true` emits the versioned single-line JSON contract; `false` emits the human-readable `Orca server ready` block. |
 | `ORCA_NO_SANDBOX` | `true` | Adds Chromium's `--no-sandbox`. Read [Security](#security) before changing. |
@@ -317,35 +481,78 @@ sh` sees them.
 
 ---
 
-## Updating
+## Redeploying
 
 `orca serve` never updates itself — upstream is explicit that headless mode wires
 up no auto-updater, and the runtime reports
 `"remoteUpdateSupport": {"automatic": false, "reason": "updater-unavailable"}`.
-Upgrading means replacing the image and restarting.
+Upgrading is always a deliberate step: replace the image, restart.
+
+What each command actually does to your image, your container and your data.
+
+| Command | Image | Container | State, worktrees, projects | Pairing |
+| --- | --- | --- | --- | --- |
+| `docker compose restart` | unchanged | same container | untouched | unchanged |
+| `docker compose up -d` | unchanged¹ | recreated only if the compose file changed | untouched | unchanged |
+| `docker compose pull && docker compose up -d` | **updated** | recreated | untouched | unchanged |
+| `docker compose down && docker compose up -d` | unchanged | recreated | untouched | unchanged |
+| `docker compose down -v` | unchanged | recreated | **DESTROYED** | **must re-pair** |
+
+¹ `docker compose up -d` does **not** pull. If the tag is already present locally,
+nothing is downloaded and nothing changes. That is why restarting keeps you on the
+same version — updating is always an explicit `pull`, or a `--build`.
+
+So, to answer the two questions directly:
+
+- **Restarting keeps everything, including the version.** Nothing is lost, no client
+  re-pairs, no worktree moves.
+- **Redeploying after a `pull` upgrades Orca and still keeps everything.** The
+  volumes outlive the container, so state, worktrees and projects are untouched and
+  paired clients reconnect without re-pairing.
+
+### Is persistence optional?
+
+No — it is what the compose files are for. But *where* it persists is your choice:
+
+- **Named volumes** (default). Docker-managed, invisible on the host, survive
+  `down`, `up`, `pull` and image rebuilds. Only `down -v` removes them.
+- **Host directories** (`ORCA_PROJECTS=/srv/repos`, or the whole `hostpaths`
+  deployment). Real files you can inspect and back up with normal tools.
+
+Either way, `down -v` is the destructive command. It is the only routine operation
+that costs you Orca's configuration, the worktrees, and every paired client.
+
+### Updating to a newer Orca
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose pull && docker compose up -d          # track :latest
 ```
 
-Your state lives in the volumes (or the host directory), not next to the binary, so
-projects, worktrees, terminal history and paired-device keys survive. Mobile and
-web clients reconnect without re-pairing. New builds migrate older state on load.
-
-**Live processes do not survive.** A restart kills every terminal and agent in the
-container; conversations may be resumable, but in-flight commands are gone.
-
-To pin a specific Orca release rather than track `latest`, build locally:
+To pin instead, build locally at the version you want — the tag is what decides:
 
 ```bash
-ORCA_VERSION=v1.4.206 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+ORCA_VERSION=v1.4.210 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
+
+`docker compose up -d --build` alone reuses the `ORCA_VERSION` from `.env`, so it
+rebuilds the same version rather than fetching a newer one.
+
+New builds migrate older state on load, so a forward upgrade needs no manual data
+step.
+
+### What does not survive
+
+**Live processes.** A restart kills every terminal and agent in the container.
+Conversations may be resumable, but the running process and any in-flight command
+are gone. Orca's own upgrade guidance for systemd deployments is the same: do a
+terminal census and finish work before restarting.
+
+**Nothing else**, as long as you did not pass `-v`.
 
 ### Rolling back
 
-A newer build may rewrite `orca-data.json` in a newer schema, and an older build
-can then discard fields it does not recognise. Roll back the **state and the image
+A newer build may rewrite `orca-data.json` in a newer schema, and an older build can
+then discard fields it does not recognise. Roll back the **state and the image
 together** — restoring the image alone is not safe:
 
 ```bash
@@ -577,9 +784,13 @@ Honest accounting. The following were executed against the built image on
 | Web client served: `GET /web-index.html` → 200 `text/html`, `<title>Orca Web</title>` | ✅ |
 | WebSocket upgrade → `101 Switching Protocols` with a valid `Sec-WebSocket-Accept` | ✅ |
 | **Pairing end to end between two containers on a shared network** | ✅ `environment add` + `status --environment` returned the remote `runtimeId` with `connectionState: "connected"` |
-| Mobile pairing (`--mobile-pairing`) mints a `scope: "mobile"` code | ✅ |
-| **Worktree survives container destroy + recreate** (named volume) | ✅ checkout and an uncommitted file both survived; Orca still listed it |
-| **Host-path model: host `git worktree list` accepts the worktree** | ✅ not `prunable`; host can write into it |
+| Mobile pairing (`--mobile-pairing`) mints a `scope: "mobile"` code | ✅ and prints a scannable QR when `ORCA_JSON=false` |
+| A mobile-scoped code is **rejected** by a desktop consumer | ✅ `environment add` accepts it, `status --environment` fails with `runtimeId: null` |
+| Pairing link is retrievable from a running container | ✅ `orca-pairing-url` in JSON and text modes, plus the raw log one-liner |
+| Pairing link is **stable across `restart` and across `down` + `up`** | ✅ byte-identical; `deviceId` persisted in the volume |
+| Pairing link **changes** after `down -v` | ✅ new `deviceId`; clients must re-pair |
+| `--project-root` does **not** move the worktree root | ✅ worktrees still land under `$HOME/orca/workspaces` |
+| Default deployment needs **no host directory at all** | ✅ three named volumes, zero warnings, healthy |
 | `orca-ide` resolves on `PATH` in a running container | ✅ |
 | Pairing address → advertised endpoint, 7 cases incl. IPv6 and URLs | ✅ unit-tested |
 | Port published as `16774:6768` advertises `:16774`, not `:6768` | ✅ |
@@ -612,6 +823,31 @@ Honest accounting. The following were executed against the built image on
 ---
 
 ## Troubleshooting
+
+### I cannot find the pairing link
+
+```bash
+docker compose exec orca orca-pairing-url
+```
+
+If it says Orca has not reported a pairing link yet, the runtime is still starting —
+wait a few seconds. If it keeps saying that, pairing failed; the log carries a stable
+reason:
+
+```bash
+docker compose logs orca | grep -o '"pairing":{[^}]*}'
+```
+
+Stable reasons are `disabled_by_operator` (you passed `--no-pairing`),
+`websocket_unavailable`, `device_registry_unavailable`, `e2ee_key_unavailable` and
+`invalid_advertised_endpoint`. The last one means `ORCA_PAIRING_ADDRESS` was a
+wildcard or otherwise unusable.
+
+### The logs look broken before the server starts
+
+They are not — see [Reading the console](#reading-the-console). D-Bus and keyring
+messages are expected on a headless host. The only line that means "it works" is
+`orca_server_ready`.
 
 ### The client cannot connect
 
@@ -664,7 +900,7 @@ Two distinct causes, and the entrypoint names the directory it could not write:
 
 - **Rootless Podman.** Your host UID maps to container UID 0, so the bind mount is
   root-owned inside the container. Add the Podman overlay to *either* compose file:
-  `podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d`.
+  `podman-compose -f docker-compose.yml -f docker-compose.rootless.yml up -d`.
 - **SELinux host.** Unix permissions look correct but the label blocks writes. Set
   `ORCA_SELINUX_LABEL=:z` in `.env`.
 
