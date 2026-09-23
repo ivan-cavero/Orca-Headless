@@ -163,10 +163,16 @@ agrees with Orca. Full reference:
 | [Configuration](docs/configuration.md) | Every environment variable, ports, paths, backups |
 | [Deployment](docs/deployment.md) | Storage modes, Dokploy, rootless, redeploying, updating, running like a native install |
 | [Pairing and connecting](docs/pairing.md) | The pairing link, desktop/browser/mobile clients, network rules, verifying a pairing |
+| [Agents and skills](docs/agents-and-skills.md) | Where skills live, how Orca finds agents, and why it cannot run the ones on your host |
 | [Security](docs/security.md) | The non-root model, why `--no-sandbox` is the default, stored secrets |
 | [Troubleshooting](docs/troubleshooting.md) | Every startup log line explained, and the failures you are likely to hit |
 | [Development](docs/development.md) | Building the image, image size, the full verification table, what is *not* verified |
 | [Contributing](CONTRIBUTING.md) | How to report a bug and how to test a change |
+
+**Running agents?** Read [Agents and skills](docs/agents-and-skills.md) first. Orca
+launches agents from `PATH` inside its own environment, so it cannot see the ones
+installed on your host — they have to be in the image. That page has the verified
+recipe.
 
 ---
 

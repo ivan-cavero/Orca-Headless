@@ -84,15 +84,20 @@ volumes:
   - /home/you/.local/bin:/home/orca/.local/bin:ro
 ```
 
-Or build a derived image — the reproducible option:
+Or build an image with them installed — the reproducible option. Node is a build
+argument because Ubuntu 24.04's own `nodejs` is too old for the tooling:
+
+```bash
+docker build --build-arg NODE_VERSION=24.21.0 -t orca-headless:node .
+```
 
 ```dockerfile
-FROM ghcr.io/ivan-cavero/orca-headless:latest
+FROM orca-headless:node
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
- && rm -rf /var/lib/apt/lists/*
+# npm's global prefix is /usr, so this must run as root. As the unprivileged
+# user it fails with a permissions error.
+RUN npm install -g @openai/codex
 USER orca
-RUN npm install -g @anthropic-ai/claude-code @openai/codex
 ```
 
 Then authenticate from inside the container, since a login on your laptop does not
@@ -104,6 +109,11 @@ orca-ide account add --agent claude
 orca-ide account add --agent codex
 orca-ide account list
 ```
+
+**Orca cannot run an agent installed on the host.** A container is isolated: Orca
+launches agents from `PATH` in its own environment. See
+[Agents and skills](agents-and-skills.md#the-container-boundary) for the full model,
+including where skills are installed and why `npm install -g` needs root.
 
 ## Worktrees disappear after `docker compose down`
 

@@ -20,6 +20,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 | `PUID` / `PGID` | `1000` / `1000` | UID/GID of the `orca` user. Must be ≥ 1000. |
 | `ORCA_USER` | `orca` | Name of the unprivileged user. Cosmetic — see [Running like a native install](deployment.md#about-the-user-name). |
 | `ORCA_EXTRA_PACKAGES` | *(empty)* | Extra apt packages, space-separated. |
+| `NODE_VERSION` | *(empty)* | Node.js version to install from nodejs.org. Needed for `orca skills install` and `npm install -g`. Adds ~200 MB. See [Agents and skills](agents-and-skills.md). |
 | `UBUNTU_VERSION` | `24.04` | Base image tag. |
 
 ### How the build works
@@ -111,6 +112,15 @@ Honest accounting. The following were executed against the built image on **Podm
 | Wildcard `ORCA_PAIRING_ADDRESS` and non-numeric ports rejected at startup | ✅ exit 1, message names the variable |
 | `docker-compose.yml` runs end to end in both storage modes | ✅ via `podman-compose` |
 | Unwritable state / workspaces / projects directory produces a warning | ✅ |
+| All 8 bundled skills print offline with `skills get` | ✅ 104–376 lines each |
+| `skills install` lands in `$HOME/.agents/skills/` and persists a recreate | ✅ |
+| Ubuntu 24.04's Node 18 is too old for the community `skills` CLI | ✅ fails with a `styleText` error |
+| `npm install -g` as non-root fails; as root succeeds | ✅ both observed |
+| A real agent installs and Orca auto-detects it | ✅ `@openai/codex` 0.156.1 |
+| Orca creates a real, connected PTY in a worktree | ✅ `connected: true`, `writable: true` |
+| Orca opens the container's bash, not the host's shell | ✅ zsh and fish absent from the image |
+| Host dotfiles load only when `ORCA_HOME_DIR` points at that home | ✅ verified with a marker in a custom `.bashrc` |
+| Node 24 LTS works for `skills install` and `npm install -g` | ✅ v24.21.0, npm 11.19.0 |
 
 ### Not verified, and worth knowing
 
