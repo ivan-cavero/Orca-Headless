@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Orca itself — bugs, crashes, agent behaviour
+    url: https://github.com/stablyai/orca/issues
+    about: This repository packages Orca. Anything inside Orca belongs upstream.
+  - name: Security report
+    url: https://github.com/ivan-cavero/orca-headless/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue. See SECURITY.md.
+  - name: Documentation
+    url: https://github.com/ivan-cavero/orca-headless/tree/main/docs
+    about: Configuration, deployment, pairing, agents and skills, troubleshooting.

@@ -1,0 +1,105 @@
+name: Bug report
+description: Something in the image, the entrypoint, the scripts or the compose files is broken.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Two things first:
+
+        **This repository packages Orca; it cannot fix Orca.** If an agent does not
+        start, a worktree command misbehaves, or the pairing protocol itself is
+        wrong, that belongs [upstream](https://github.com/stablyai/orca/issues).
+
+        **Never paste a pairing URL.** It is a credential. Revoke the grant if you
+        already did.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The observed behaviour, not a summary of it.
+      placeholder: Paste the actual output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and why
+      description: What made you expect that? A doc line, a similar setup that works, a previous version.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The exact command you ran
+      description: The full `docker compose` or `docker run` invocation, plus your `.env` with secrets removed.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Startup log
+      description: |
+        Output of `docker compose logs orca`. Most of it is expected noise — see
+        [Reading the console](https://github.com/ivan-cavero/orca-headless/blob/main/docs/troubleshooting.md#reading-the-console).
+        Quote the lines you are asking about rather than the whole thing.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: healthcheck
+    attributes:
+      label: Healthcheck result
+      description: "`docker compose exec orca orca-healthcheck`"
+      placeholder: "orca-healthcheck: ready on port 6768"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Container engine
+      options:
+        - Docker (rootful)
+        - Docker (rootless / userns-remap)
+        - Podman (rootful)
+        - Podman (rootless)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`docker --version` (or `podman --version`), the image tag you are running, and `docker compose exec orca cat /opt/orca/VERSION`"
+      placeholder: "Docker 27.3.1 / ghcr.io/ivan-cavero/orca-headless:latest / v1.4.209"
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host
+      description: Distribution and version, and architecture (`uname -m`)
+      placeholder: "Ubuntu 24.04, x86_64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Anything unusual about your setup
+      description: |
+        SELinux, Tailscale, a reverse proxy, `ORCA_HOME_DIR`, a bind-mounted
+        repositories directory, a derived image. Anything that makes your setup
+        different from the quick start.
+    validations:
+      required: false
