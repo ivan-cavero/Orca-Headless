@@ -11,7 +11,7 @@ on:
 env:
   REGISTRY: ghcr.io
   # The Orca release baked into the image. Bump this to ship a new Orca.
-  ORCA_VERSION: v1.4.206
+  ORCA_VERSION: v1.4.209
 
 jobs:
   lint:
@@ -39,6 +39,21 @@ jobs:
         # Relative links and #anchors must resolve; a docs refactor once left
         # several pointing at sections that had been renamed.
         run: python3 scripts/check-links.py
+
+      - name: Warn if a newer Orca has been released
+        # The pinned Orca version goes stale silently, and the image then ships
+        # an old build with no signal. This is a warning, not a failure: bumping
+        # is a deliberate commit that has to be verified, not something CI
+        # should force on every run.
+        run: |
+          latest=$(curl -fsSL -H 'User-Agent: Mozilla/5.0' \
+            https://github.com/stablyai/orca/releases.atom \
+            | grep -oE '<title>v[0-9]+\.[0-9]+\.[0-9]+</title>' \
+            | head -1 | sed -E 's|</?title>||g')
+          echo "pinned: ${ORCA_VERSION}  latest: ${latest:-unknown}"
+          if [ -n "${latest}" ] && [ "${latest}" != "${ORCA_VERSION}" ]; then
+            echo "::warning title=Orca version is behind::Pinned ${ORCA_VERSION} but ${latest} has been released. Bump ORCA_VERSION in the Dockerfile, .env.example, docker-compose.build.yml and this workflow, then verify the container still reaches healthy."
+          fi
 
       - name: Validate compose files
         run: |

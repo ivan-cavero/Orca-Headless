@@ -14,7 +14,7 @@ Every variable is optional. Copy `.env.example` to `.env` and edit.
 | `ORCA_JSON` | `true` | `true` emits the versioned single-line JSON contract; `false` emits the human-readable `Orca server ready` block and a scannable QR with `--mobile-pairing`. |
 | `ORCA_NO_SANDBOX` | `true` | Adds Chromium's `--no-sandbox`. Read [Security](security.md) before changing. |
 | `ORCA_EXTRA_ARGS` | *(empty)* | Extra flags appended to `orca serve`: `--mobile-pairing`, `--no-pairing`. |
-| `ORCA_VERSION` | `v1.4.206` | Orca release baked in. Only read when building locally. |
+| `ORCA_VERSION` | `v1.4.209` | Orca release baked in. Only read when building locally. |
 
 Inside the container these are set as `ENV` as well, so `docker compose exec orca sh`
 sees them.

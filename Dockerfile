@@ -26,7 +26,7 @@ FROM --platform=${BUILDPLATFORM} ubuntu:${UBUNTU_VERSION} AS fetch
 
 # Pin a concrete release for reproducible builds; `latest` is accepted but not
 # recommended. CI overrides this with the version it was told to publish.
-ARG ORCA_VERSION=v1.4.206
+ARG ORCA_VERSION=v1.4.209
 # Provided automatically by BuildKit for multi-platform builds.
 ARG TARGETARCH
 

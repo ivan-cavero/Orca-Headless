@@ -16,7 +16,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 | Argument | Default | Purpose |
 | --- | --- | --- |
-| `ORCA_VERSION` | `v1.4.206` | Orca release to download. `latest` works but is not reproducible. |
+| `ORCA_VERSION` | `v1.4.209` | Orca release to download. `latest` works but is not reproducible. |
 | `PUID` / `PGID` | `1000` / `1000` | UID/GID of the `orca` user. Must be ≥ 1000. |
 | `ORCA_USER` | `orca` | Name of the unprivileged user. Cosmetic — see [Running like a native install](deployment.md#about-the-user-name). |
 | `ORCA_EXTRA_PACKAGES` | *(empty)* | Extra apt packages, space-separated. |

@@ -15,7 +15,7 @@ services:
     build:
       context: .
       args:
-        ORCA_VERSION: ${ORCA_VERSION:-v1.4.206}
+        ORCA_VERSION: ${ORCA_VERSION:-v1.4.209}
         PUID: ${PUID:-1000}
         PGID: ${PGID:-1000}
         # Space-separated extra apt packages, e.g. "gnupg2 pass" for a keyring.
