@@ -221,9 +221,11 @@ if [ "$ORCA_NO_SANDBOX" = "true" ]; then
 else
   log "  sandbox          : enabled (needs cap_add: [SYS_ADMIN] on the container)"
 fi
-log "  expected noise   : D-Bus and keyring messages below are normal on a"
-log "                     headless host. The line that matters is the readiness"
-log "                     contract; run 'orca-pairing-url' to print the link."
+log "  expected noise   : Chromium logs a few errors below that are expected and"
+log "                     harmless. A container has no system D-Bus, no session"
+log "                     D-Bus and no keyring, and Orca needs none of them to"
+log "                     serve. The line that matters is the readiness contract;"
+log "                     run 'orca-pairing-url' to print the link."
 
 # exec: Orca becomes PID 1 and receives SIGTERM/SIGINT directly.
 exec "$ORCA_LAUNCHER" "${args[@]}"

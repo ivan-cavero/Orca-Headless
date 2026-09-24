@@ -35,6 +35,27 @@ ERROR:dbus/object_proxy.cc:572] Failed to call method: ... <- NOISE, harmless
 The line that decides whether the container is usable is the last one. Everything
 before it is either noise or a warning you can act on later.
 
+### Why the D-Bus noise cannot be removed
+
+It is worth recording, because it looks fixable and is not.
+
+Chromium logs two kinds of D-Bus failure: one for the **session** bus and one for the
+**system** bus at `/run/dbus/system_bus_socket`. Measured on a real container: ten
+lines without anything, six with a session `dbus-daemon` running. Providing the
+session bus removes four of them and adds a `dbus` package plus a daemon process.
+
+The remaining six are the system bus, which needs a second daemon running as root, and
+Orca's own keyring notice, which needs an unlocked keyring — the thing that does not
+exist in a headless container in the first place. Fully silencing the log would mean
+turning the container into something close to a desktop, for output that is
+informational.
+
+`DBUS_SESSION_BUS_ADDRESS=disabled:` does not help either; measured, it changes
+nothing.
+
+So the entrypoint names the noise before it appears instead, and the readiness line
+stays the thing to look for.
+
 To see only what matters:
 
 ```bash
