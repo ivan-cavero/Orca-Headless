@@ -138,6 +138,21 @@ Agents resolve their configuration under `$HOME`. That is why `HOME` is set to t
 host account's home path: then the mounted `.config/opencode` is exactly where
 opencode looks, with no second path to keep in sync.
 
+### Mounting a deep path needs its parents to exist
+
+Mounting the host's opencode session store at `/home/orca/.local/share/opencode`
+creates `/home/orca/.local` as a **root-owned mount point**, and the unprivileged user
+then cannot create anything beside it:
+
+```
+EACCES: permission denied, mkdir '/home/orca/.local/state'
+```
+
+The image now creates `$HOME/.local`, `.local/bin`, `.local/share`, `.local/state` and
+`.cache` with the right ownership, so a deep mount under the home does not break its
+parent. Verified: with the session store mounted that way, `opencode --version`
+reports its version instead of failing.
+
 ### Only mount what exists
 
 Docker creates a missing bind source as a **root-owned empty directory**. A mount for

@@ -204,14 +204,25 @@ RUN set -eux; \
     groupadd --gid "${PGID}" "${ORCA_USER}"; \
     useradd --uid "${PUID}" --gid "${PGID}" \
             --create-home --shell /bin/bash --no-log-init "${ORCA_USER}"; \
-    # These directories are mounted as named volumes in compose. Creating them
-    # here with the right ownership matters: Docker seeds a fresh named volume
-    # from the image, so a directory that does not exist would be created
-    # root-owned and the unprivileged user could not write to it. `install -d`
-    # applies -o/-g only to the paths it is given, so the parent has to be
-    # listed explicitly — otherwise /home/orca/orca ends up root-owned.
+    # These directories are mounted as named volumes in compose, and they are also
+    # the parents of the mounts people add. Both matter for the same reason: the
+    # runtime creates a missing mount point itself, as root, and the unprivileged
+    # user then cannot write next to it.
+    #
+    # That is not theoretical. Mounting the host's opencode session store at
+    # /home/orca/.local/share/opencode creates /home/orca/.local as a root-owned
+    # mount point, and opencode then dies with
+    # "EACCES: permission denied, mkdir '/home/orca/.local/state'".
+    #
+    # `install -d` applies -o/-g only to the paths it is given, so every parent is
+    # listed explicitly rather than relying on intermediate creation.
     install -d -o "${ORCA_USER}" -g "${PGID}" -m 0755 \
       "/home/${ORCA_USER}/.config" \
+      "/home/${ORCA_USER}/.local" \
+      "/home/${ORCA_USER}/.local/bin" \
+      "/home/${ORCA_USER}/.local/share" \
+      "/home/${ORCA_USER}/.local/state" \
+      "/home/${ORCA_USER}/.cache" \
       "/home/${ORCA_USER}/orca" \
       "/home/${ORCA_USER}/orca/workspaces" \
       "/home/${ORCA_USER}/projects"; \
