@@ -444,6 +444,45 @@ Two limits apply either way:
 
 ---
 
+## Features that need a desktop
+
+Not everything Orca does survives in a headless container, and it is worth knowing
+which parts before you plan around them.
+
+### Computer Use does not work here
+
+`computer use` drives the GUI of a **visible local app window** through the
+accessibility tree, clicks and screenshots. In this container there is no visible
+window, no window manager, no D-Bus session bus for the accessibility stack, and no
+GUI applications at all — which is the point of a headless server.
+
+Verified: `orca computer capabilities --json` fails with
+`accessibility_error: spawn python3 ENOENT`. `python3` is not in the image. Adding it
+would move the error rather than fix the feature: with no window manager and no apps
+to drive, there is nothing for it to control.
+
+Use it on the machine where the windows are — your desktop — and reach the server over
+pairing. Orca's own embedded browser is driven through `orca-cli`, not Computer Use.
+
+### The emulator skills are platform-specific
+
+`orca-emulator` targets the iOS Simulator and is macOS-only. `orca-emulator-android`
+drives a device or emulator over `adb`; it needs `adb` in the image and a reachable
+device, neither of which is there by default.
+
+### What does work
+
+Everything that runs in a terminal:
+
+| Feature | Status |
+| --- | --- |
+| Agents in worktrees, with their own config and credentials | ✅ verified |
+| Orchestration — the runtime reports `graph.state: ready`, and the `orchestration` command group is present | ✅ verified |
+| Terminal sessions, reading and writing to them | ✅ verified |
+| Worktrees, diffs, projects | ✅ verified |
+| Pairing from desktop, browser and mobile | ✅ verified |
+| Skills, including `computer-use` as readable guidance | ✅ the guide prints; acting on it is what needs a desktop |
+
 ## What was verified, and what was not
 
 Verified against a real image:
