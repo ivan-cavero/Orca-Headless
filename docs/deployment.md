@@ -136,7 +136,25 @@ is the host account — the volume is owned by a stranger and the container stop
 FATAL: '/home/orca' is not usable by uid 1001 (mode 750, owner 1000:1000)
 ```
 
-Two ways out, and they are not interchangeable:
+**The path with no host preparation at all** is to match the image to the host
+account instead, which is what the `PUID` build argument is for. Build once with the
+host's numbers and keep the named volume:
+
+```bash
+docker build --build-arg PUID=1001 --build-arg PGID=1001 -t orca-headless:1001 .
+```
+
+The image then ships its home directories owned by 1001, the volume is seeded with
+them, and nothing has to exist on the host beforehand. Verified: a named volume with
+deep mounts under it — the opencode session store, its config, the skills directory —
+reaches healthy with zero warnings, the session binder does not skip, and no mount
+leaves a root-owned parent behind.
+
+That is the difference between the two approaches. A bind mount takes its ownership
+from the host, so the host has to be prepared; a named volume takes it from the image,
+so the image has to match.
+
+The two ways out for an existing mismatch are not interchangeable:
 
 **Use a bind mount instead of the named volume.** A bind takes its ownership from the
 host, so chowning the host directory is enough. Pre-create the directories the mounts
