@@ -17,3 +17,6 @@ Thumbs.db
 
 # Docker scratch
 docker-compose.override.yml
+
+# Local Pi runtime state
+.atl/
