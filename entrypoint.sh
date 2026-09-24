@@ -90,14 +90,22 @@ for agent_bin in "${orca_home}/.local/bin" "${orca_home}/.bun/bin" "${orca_home}
   esac
 done
 
-# Agents installed through nvm sit on a version-specific path, and they shell out to
-# `node`, which the image does not ship unless NODE_VERSION was set at build time.
-# Picking up whatever nvm has lets a host-managed agent work without a rebuild.
-for nvm_bin in "${orca_home}"/.nvm/versions/node/*/bin; do
-  if [ -d "${nvm_bin}" ]; then
+# Agents installed through a Node version manager sit on a version-specific path,
+# and they shell out to `node`, which the image does not ship unless NODE_VERSION was
+# set at build time. Picking up whatever is there lets a host-managed agent work
+# without a rebuild.
+#
+# Two layouts exist in the wild and both are checked: nvm's default
+# ($HOME/.nvm/versions/node/<v>/bin) and the one that puts the versions under the
+# data directory ($HOME/.local/share/nvm/<v>/bin). Missing the second is how a real
+# `pi` install kept failing with "/usr/bin/env: 'node': No such file or directory".
+for node_bin in \
+  "${orca_home}"/.nvm/versions/node/*/bin \
+  "${orca_home}"/.local/share/nvm/*/bin; do
+  if [ -d "${node_bin}" ]; then
     case ":${PATH}:" in
-      *":${nvm_bin}:"*) ;;
-      *) PATH="${nvm_bin}:${PATH}" ;;
+      *":${node_bin}:"*) ;;
+      *) PATH="${node_bin}:${PATH}" ;;
     esac
   fi
 done

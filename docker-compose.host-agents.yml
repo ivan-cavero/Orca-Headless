@@ -1,0 +1,74 @@
+# Host-agents overlay — use the agents you already have on the host.
+#
+#   podman-compose -f docker-compose.yml -f docker-compose.host-agents.yml up -d
+#   docker compose  -f docker-compose.yml -f docker-compose.host-agents.yml up -d
+#
+# Orca's own state stays in the named volume. The agent tooling comes from the host.
+#
+# Set ONE variable:
+#
+#   ORCA_AGENT_HOME=/home/you     # the account that owns the agents, absolute
+#
+# This is the layout for a host where you already run the agents yourself and want
+# the container to use the same ones, with the same configuration, skills and
+# session history.
+#
+# If you control the host and are not on Dokploy, prefer setting ORCA_HOME_DIR to
+# that same path in .env instead: one variable, no mounts, and nothing to keep in
+# sync. This overlay exists for the case where the two must stay separate — Dokploy
+# cleans absolute host paths between deployments, for example.
+#
+# Two rules are baked in, because getting either wrong fails quietly:
+#
+#   * Binaries mount at THEIR OWN path. Agent installers leave absolute symlinks to
+#     versioned directories, and a different mount path makes them dangle: the agent
+#     disappears and it looks like a libc problem.
+#   * Configuration and state mount at the container's HOME, because that is where
+#     agents look for them.
+#
+# Comment out anything your host does not have. A mount for a directory that does not
+# exist leaves a root-owned empty directory behind.
+
+services:
+  orca:
+    environment:
+      # The binary paths are the HOST paths, because that is where they are mounted.
+      #
+      # The entrypoint adds the container home's own bin directories — including
+      # whatever Node version manager it finds — on top of this, and Orca and the
+      # agents it launches inherit that. `docker compose exec` does NOT: it sees the
+      # image's ENV PATH, which is this value. So an agent that needs `node` works
+      # when Orca runs it but not from `exec`, unless you add the Node path here too.
+      PATH: "${ORCA_AGENT_HOME:?set ORCA_AGENT_HOME to the absolute host home of the account that owns the agents}/.bun/bin:${ORCA_AGENT_HOME}/.local/bin:/opt/orca/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+    volumes:
+      # --- Binaries: mounted at their own absolute path -------------------------
+      - ${ORCA_AGENT_HOME}/.bun:${ORCA_AGENT_HOME}/.bun:ro
+      - ${ORCA_AGENT_HOME}/.local:${ORCA_AGENT_HOME}/.local:ro
+
+      # --- Node, for agents that are bundles rather than binaries ---------------
+      # `pi` and others shell out to `node`. The entrypoint looks for node under
+      # $HOME, so whichever layout the host uses has to be reachable from the
+      # container's home. Both known layouts are listed; keep the one you have and
+      # delete the other, or the missing one leaves a root-owned empty directory.
+      #
+      # Without this they fail with "/usr/bin/env: 'node': No such file or directory"
+      # while Orca still reports them as detected — detection only checks PATH.
+      - ${ORCA_AGENT_HOME}/.nvm:/home/orca/.nvm:ro
+      - ${ORCA_AGENT_HOME}/.local/share/nvm:/home/orca/.local/share/nvm:ro
+
+      # --- Configuration, skills and state: at the container's home -------------
+      - ${ORCA_AGENT_HOME}/.agents:/home/orca/.agents
+      - ${ORCA_AGENT_HOME}/.config/opencode:/home/orca/.config/opencode
+
+      # opencode's session store. Orca reads it through its opencode-binder; without
+      # it the binder skips with "SQLite database does not exist" and the failure is
+      # non-fatal, so the missing history goes unnoticed.
+      - ${ORCA_AGENT_HOME}/.local/share/opencode:/home/orca/.local/share/opencode
+
+      # --- Gentle AI state ------------------------------------------------------
+      # Comment out any of these the host does not have. Without them the container
+      # starts with an empty memory store and skill registry, and says nothing.
+      - ${ORCA_AGENT_HOME}/.engram:/home/orca/.engram
+      - ${ORCA_AGENT_HOME}/.atl:/home/orca/.atl
+      - ${ORCA_AGENT_HOME}/.gentle-ai:/home/orca/.gentle-ai
