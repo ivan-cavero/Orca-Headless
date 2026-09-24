@@ -234,6 +234,35 @@ This works for any account, but not unconditionally:
 - **On Dokploy**, absolute host paths are cleaned between deployments, so use the
   named volume with Advanced → Mounts instead of this mode.
 
+### Agents that need Node
+
+Some agents are not self-contained binaries. `pi`, for example, is a bundle whose
+shebang is `#!/usr/bin/env node`, and the image ships no Node unless `NODE_VERSION`
+was set at build time. Without it the agent fails with
+`/usr/bin/env: 'node': No such file or directory`.
+
+The entrypoint picks up whatever nvm has installed — `$HOME/.nvm/versions/node/*/bin`
+— so a host-managed Node works without rebuilding. Verified: `pi` reports `0.85.1`
+and `node` reports its version inside the container.
+
+If you would rather not depend on the host's Node, build the image with
+`NODE_VERSION` and it is on `PATH` for everything.
+
+### Tools that live outside the usual bin directories
+
+An MCP server configured with an **absolute path** only resolves if the home is
+mounted at that same path. opencode's config here launches Engram as
+`/home/you/.local/bin/engram mcp --tools=agent`, so an identity mount of the home is
+what makes it work — mounting the config at a different path leaves the MCP server
+pointing at a file that does not exist inside the container.
+
+Engram itself is a statically linked binary, so it runs anywhere once it is reachable.
+Verified: `engram 2.0.0` inside the container.
+
+A Gentle AI setup keeps its state under the home as well — `~/.atl` for the skill
+registry, `~/.engram` for the memory store, `~/.gentle-ai` — so all of it arrives with
+the same mount and needs no extra configuration.
+
 ### The explicit way: separate state, chosen mounts
 
 If you want Orca's state somewhere else — `/srv/orca`, `/var/lib/orca` — and only the
@@ -314,7 +343,8 @@ glibc baseline for portability. That is luck rather than a guarantee:
 
 | Mounted | Use | Why |
 | --- | --- | --- |
-| Agent **binaries** | `:ro` | The container has no business modifying your host's binaries. Note that an agent which self-updates will fail to update — remount that one directory read-write if you want it to. |
+| Agent **binaries** | `:ro` **only if the agent writes nothing under it** | The container has no business modifying your host's binaries. But most agents keep state beside them: opencode writes `~/.local/state/opencode` and `~/.cache`, so a read-only `~/.local` makes it fail with `EACCES: permission denied, mkdir`. Check before tightening. |
+| **`~/.local`** | `:rw` in practice | It holds binaries *and* the state and cache most agents write. Read-only looks like the safe choice and breaks them at startup. |
 | Agent **config and credentials** | `:rw` if you want the container to share your host login and write sessions; `:ro` if you only want it to read them | Verified: with `:rw`, a file written from inside the container lands on the host with the host user's ownership. |
 | **Skills** | `:rw` if you want `orca skills install` to write there | With `:ro` the install fails. If you keep skills in the Orca volume instead — the default, `$HOME/.agents` — no mount is needed at all. |
 

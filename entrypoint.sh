@@ -89,6 +89,18 @@ for agent_bin in "${orca_home}/.local/bin" "${orca_home}/.bun/bin" "${orca_home}
     *) PATH="${agent_bin}:${PATH}" ;;
   esac
 done
+
+# Agents installed through nvm sit on a version-specific path, and they shell out to
+# `node`, which the image does not ship unless NODE_VERSION was set at build time.
+# Picking up whatever nvm has lets a host-managed agent work without a rebuild.
+for nvm_bin in "${orca_home}"/.nvm/versions/node/*/bin; do
+  if [ -d "${nvm_bin}" ]; then
+    case ":${PATH}:" in
+      *":${nvm_bin}:"*) ;;
+      *) PATH="${nvm_bin}:${PATH}" ;;
+    esac
+  fi
+done
 export PATH
 
 # Orca advertises this address to clients; it does not change the bind address.

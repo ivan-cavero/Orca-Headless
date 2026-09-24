@@ -125,6 +125,9 @@ Honest accounting. The following were executed against the built image on **Podm
 | An already-paired client survives a `--mobile-pairing` restart | ✅ still connected |
 | A home with mode `700` works | ✅ verified as uid 1001 |
 | Orca's `opencode-binder` reads `$HOME/.local/share/opencode/opencode.db` | ✅ and skips with a non-fatal error when it is absent |
+| `engram` (static ELF) runs in the container | ✅ `engram 2.0.0` |
+| `pi` needs Node; the entrypoint picks up nvm's | ✅ `pi 0.85.1` after the nvm path is added |
+| A read-only `~/.local` breaks opencode | ✅ `EACCES: mkdir /home/.../.local/state/opencode` |
 | The real **arm64** AppImage extracts without emulation | ✅ 3613 files, executable AppRun, `orca-ide` is aarch64 |
 | Orca publishes no 32-bit ARM build | ✅ only `orca-linux.AppImage` and `orca-linux-arm64.AppImage` exist |
 
