@@ -3,7 +3,7 @@
 [![Build and publish image](https://github.com/ivan-cavero/orca-headless/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ivan-cavero/orca-headless/actions/workflows/docker-publish.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Image: ghcr.io](https://img.shields.io/badge/ghcr.io-orca--headless-blue?logo=docker&logoColor=white)](https://github.com/ivan-cavero/orca-headless/pkgs/container/orca-headless)
-[![Orca](https://img.shields.io/badge/packages-orca%20v1.4.209-black)](https://github.com/stablyai/orca/releases)
+[![Orca](https://img.shields.io/badge/packages-orca%20v1.4.210-black)](https://github.com/stablyai/orca/releases)
 
 Run [Orca](https://www.onorca.dev) — the agent development environment — on a Linux
 server with **no desktop session**: a VPS, a build box, a VM, a home server. Then

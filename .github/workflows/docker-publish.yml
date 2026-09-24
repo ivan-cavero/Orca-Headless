@@ -11,7 +11,7 @@ on:
 env:
   REGISTRY: ghcr.io
   # The Orca release baked into the image. Bump this to ship a new Orca.
-  ORCA_VERSION: v1.4.209
+  ORCA_VERSION: v1.4.210
 
 jobs:
   lint:

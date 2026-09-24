@@ -165,7 +165,7 @@ A healthy answer carries:
   "reachable": true,
   "connectionState": "connected",
   "runtimeId": "93b53c1d-...",
-  "appVersion": "1.4.209"
+  "appVersion": "1.4.210"
 }
 ```
 
