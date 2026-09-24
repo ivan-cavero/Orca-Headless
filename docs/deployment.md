@@ -125,6 +125,44 @@ the symptom is `Permission denied` on a directory that appears to be owned by yo
 The entrypoint warns when it detects any of this, naming the directory it could not
 write to, so a misconfiguration is loud rather than silent.
 
+### The image's PUID and the compose's user: must agree
+
+The image creates its home directories owned by the **build-time** `PUID` (1000 by
+default). A named volume is seeded from those, so it arrives owned by 1000. If the
+compose then runs the container as a different uid — `user: "1001:1001"` because that
+is the host account — the volume is owned by a stranger and the container stops:
+
+```
+FATAL: '/home/orca' is not usable by uid 1001 (mode 750, owner 1000:1000)
+```
+
+Two ways out, and they are not interchangeable:
+
+**Use a bind mount instead of the named volume.** A bind takes its ownership from the
+host, so chowning the host directory is enough. Pre-create the directories the mounts
+will sit under, or the runtime creates them as root and the parent stops being
+writable:
+
+```bash
+sudo mkdir -p /srv/orca/home/{.config,.local/share,.local/state,.cache,orca/workspaces,projects}
+sudo chown -R 1001:1001 /srv/orca/home
+```
+
+```yaml
+    volumes:
+      - /srv/orca/home:/home/orca      # instead of orca-home:/home/orca
+```
+
+**Or rebuild the image with the matching PUID**, which keeps the named volume:
+
+```bash
+docker build --build-arg PUID=1001 --build-arg PGID=1001 -t orca-headless:1001 .
+```
+
+Verified both ways. The bind mount needs the pre-created directories because the bind
+hides the ones the image ships — a deep mount such as
+`/home/orca/.local/share/opencode` otherwise creates `/home/orca/.local` as root.
+
 ### Changing userns_mode after the volume exists breaks it
 
 A named volume is seeded with the ownership produced by whatever UID mapping was in
