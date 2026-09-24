@@ -48,17 +48,48 @@ orca_home="${HOME:-/home/orca}"
 if [ ! -d "$orca_home" ]; then
   fail "the container's home directory '${orca_home}' does not exist."
 elif [ ! -x "$orca_home" ] || [ ! -w "$orca_home" ]; then
-  fail "'${orca_home}' is not usable by uid $(id -u) (mode $(stat -c '%a' "$orca_home" 2>/dev/null || echo '?'), owner $(stat -c '%u:%g' "$orca_home" 2>/dev/null || echo '?')).
+  home_owner="$(stat -c '%u' "$orca_home" 2>/dev/null || echo '?')"
+  home_mode="$(stat -c '%a' "$orca_home" 2>/dev/null || echo '?')"
+  home_group="$(stat -c '%g' "$orca_home" 2>/dev/null || echo '?')"
+  if [ "$home_owner" = "0" ]; then
+    fail "'${orca_home}' is owned by root (mode ${home_mode}) and uid $(id -u) cannot write it.
 
        Orca would start and then crash with 'Failed to get userData path' and exit
        132, which says nothing about permissions. Stopping here instead.
 
-       This normally means the volume was created under a different UID mapping.
-       Changing userns_mode, PUID, PGID or user: after the volume exists leaves it
-       owned by the previous mapping.
+       A root-owned home means the runtime created the directory itself, which is
+       what happens when a BIND MOUNT points at a path that does not exist on the
+       host yet. Docker creates it, empty and owned by root.
 
-       Fix it by recreating the volume — this loses Orca's state, so back it up
-       first if it matters:
+       Create it first, owned by the uid this container runs as:
+
+         sudo mkdir -p /srv/orca/home/.config /srv/orca/home/.local/share \\
+                      /srv/orca/home/.local/state /srv/orca/home/.cache \\
+                      /srv/orca/home/orca/workspaces /srv/orca/home/projects
+         sudo chown -R $(id -u):$(id -g) /srv/orca/home
+
+       Then recreate the container. The pre-created directories matter: the bind
+       hides the ones the image ships, so a deep mount such as
+       /home/orca/.local/share/opencode would otherwise leave /home/orca/.local
+       root-owned and break the agent that writes beside it.
+
+       Check the host path with:
+         stat -c '%u:%g %a %n' <the host directory in your compose>"
+  fi
+  fail "'${orca_home}' is not usable by uid $(id -u) (mode ${home_mode}, owner ${home_owner}:${home_group}).
+
+       Orca would start and then crash with 'Failed to get userData path' and exit
+       132, which says nothing about permissions. Stopping here instead.
+
+       The owner is not root, so this is not a missing host directory. It is a
+       mismatch: the container runs as uid $(id -u) and the directory belongs to
+       ${home_owner}.
+
+       That happens after changing userns_mode, PUID, PGID or user: on an existing
+       volume — a named volume keeps the ownership of whatever UID mapping created
+       it. Either point user: at ${home_owner}, rebuild with
+       --build-arg PUID=${home_owner} --build-arg PGID=${home_group}, or recreate
+       the volume:
 
          docker compose down
          docker volume rm <project>_orca-home
